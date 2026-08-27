@@ -1472,8 +1472,13 @@ function checkUpdate() {
       const v = (t || '').trim();
       if (!v) return;
       const seen = localStorage.getItem('yanxitai.seenVersion');
-      if (seen && seen !== v) { toast('发现新版本，正在刷新…'); setTimeout(() => location.reload(true), 900); }
-      else localStorage.setItem('yanxitai.seenVersion', v);
+      if (seen !== v) {
+        localStorage.setItem('yanxitai.seenVersion', v);
+        if (seen) {
+          toast('发现新版本，正在刷新…');
+          setTimeout(() => location.reload(true), 900);
+        }
+      }
     })
     .catch(() => {});
 }
