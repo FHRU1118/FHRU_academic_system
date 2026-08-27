@@ -40,7 +40,8 @@ const ICON = {
 const KEY = 'yanxitai.v1';
 const DEFAULT_STATE = {
   version: 1,
-  settings: { theme: 'light', paperShift: 0, nick: '', feedMode: 'live' },
+  savedAt: 0,
+  settings: { theme: 'light', paperShift: 0, nick: '', feedMode: 'live', binId: '', apiKey: '' },
   tasks: [],
   inbox: [],
   library: [],
@@ -79,9 +80,35 @@ let saveTimer = null;
 function save() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
+    S.savedAt = Date.now();
     try { localStorage.setItem(KEY, JSON.stringify(S)); }
     catch (e) { toast('本地存储写入失败，可能空间已满'); }
+    if (window.Sync && Sync.enabled()) Sync.save(S);
   }, 60);
+}
+
+// 用云端状态覆盖本地（保留云端同步凭据，避免被旧空值覆盖）
+function adoptCloud(cloud) {
+  S = normalize(Object.assign(structuredClone(DEFAULT_STATE), cloud, {
+    settings: Object.assign({}, DEFAULT_STATE.settings, cloud.settings || {})
+  }));
+  try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {}
+  renderAll();
+}
+
+// 同步状态徽标
+function updateSyncBadge(status, detail) {
+  const b = $('#syncBadge'); if (!b) return;
+  const map = {
+    off: ['未同步', 'sync--off'],
+    syncing: ['同步中', 'sync--busy'],
+    ok: ['已同步', 'sync--ok'],
+    error: ['同步异常', 'sync--err']
+  };
+  const [txt, cls] = map[status] || ['', ''];
+  b.className = 'sync-badge ' + cls;
+  b.textContent = txt;
+  b.title = detail || txt;
 }
 
 /* ---------------- 提示 ---------------- */
@@ -1039,8 +1066,20 @@ function openSettings() {
     S.sports.length + S.books.length + S.movies.length + S.trips.length + S.ledger.length;
   const body = el(`<div>
     <div class="help-block" style="margin-bottom:14px">
-      数据全部保存在本机浏览器（localStorage），不上传任何服务器。当前共 <b>${count}</b> 条记录。<br/>
-      换设备时用「导出 JSON」再在新设备「导入 JSON」即可迁移。
+      数据默认保存在本机浏览器（localStorage）。开启<b>云端同步</b>后，数据自动存到 JSONBin 云端，手机与电脑共享同一份，且代码更新不影响数据。当前共 <b>${count}</b> 条记录。
+    </div>
+    <div class="card" style="padding:14px;margin-bottom:14px">
+      <div style="font-weight:600;margin-bottom:10px">云端同步（JSONBin）</div>
+      <div class="field"><label>Bin ID</label><input id="setBinId" value="${esc(S.settings.binId || '')}" placeholder="JSONBin 的 Bin ID" /></div>
+      <div class="field"><label>API Key（X-Master-Key）</label><input id="setApiKey" type="password" value="${esc(S.settings.apiKey || '')}" placeholder="粘贴你的 Master Key" /></div>
+      <div class="sheet-actions" style="justify-content:flex-start;margin-top:4px">
+        <button class="soft-btn" id="btnTestSync">测试连接</button>
+        <button class="soft-btn" id="btnCreateBin">新建空 Bin</button>
+        <span id="syncTestResult" class="help-block" style="margin:0"></span>
+      </div>
+      <div class="help-block" style="color:var(--text-3);margin-top:8px">
+        没账号？去 jsonbin.io 注册 → 复制主页的 <b>Master Key</b> 填上面，再点「新建空 Bin」即可自动创建并填入 Bin ID。两个设备填<b>相同</b>的 Bin ID 与 Key 即共享数据。
+      </div>
     </div>
     <div class="field"><label>称呼（显示在首页问候语）</label><input id="setNick" value="${esc(S.settings.nick || '')}" placeholder="例：Fu" /></div>
     <div class="sheet-actions" style="justify-content:flex-start;margin-bottom:14px">
@@ -1055,6 +1094,34 @@ function openSettings() {
       <button class="soft-btn soft-btn--danger" id="btnClear">清空全部数据</button>
     </div>
   </div>`);
+  const bindSync = () => {
+    S.settings.binId = $('#setBinId').value.trim();
+    S.settings.apiKey = $('#setApiKey').value.trim();
+    if (window.Sync) Sync.setCreds(S.settings.binId, S.settings.apiKey);
+    save();
+    if (Sync.enabled()) Sync.startup(S, adoptCloud);
+  };
+  body.querySelector('#setBinId').onchange = bindSync;
+  body.querySelector('#setApiKey').onchange = bindSync;
+  body.querySelector('#btnTestSync').onclick = async () => {
+    const r = $('#syncTestResult');
+    if (!Sync.enabled()) { r.textContent = '请先填写 Bin ID 与 API Key'; r.style.color = 'var(--danger)'; return; }
+    r.textContent = '测试中…'; r.style.color = '';
+    try { const c = await Sync.pull(); r.textContent = '连接成功 ✓'; r.style.color = 'var(--ok)'; }
+    catch (e) { r.textContent = e.message; r.style.color = 'var(--danger)'; }
+  };
+  body.querySelector('#btnCreateBin').onclick = async () => {
+    const r = $('#syncTestResult');
+    if (!S.settings.apiKey) { r.textContent = '请先填写 API Key'; r.style.color = 'var(--danger)'; return; }
+    r.textContent = '创建中…'; r.style.color = '';
+    try {
+      const id = await Sync.createBin(S);
+      S.settings.binId = id; $('#setBinId').value = id;
+      if (window.Sync) Sync.setCreds(id, S.settings.apiKey);
+      save(); r.textContent = '已创建并填入 Bin ID ✓'; r.style.color = 'var(--ok)';
+      Sync.startup(S, adoptCloud);
+    } catch (e) { r.textContent = e.message; r.style.color = 'var(--danger)'; }
+  };
   body.querySelector('#setNick').onchange = e => { S.settings.nick = e.target.value.trim(); save(); renderGreeting(); };
   body.querySelector('#btnExport').onclick = () => {
     download(`研习台备份_${todayStr()}.json`, JSON.stringify(S, null, 2));
@@ -1268,9 +1335,34 @@ function init() {
   $('#ledgerMonth').value = todayStr().slice(0, 7);
   $('#qlDate').value = todayStr();
   syncCatOptions();
+  // 云端同步初始化
+  if (window.Sync) {
+    Sync.setCreds(S.settings.binId, S.settings.apiKey);
+    Sync.onStatus(updateSyncBadge);
+    Sync.startup(S, adoptCloud);
+  }
   bind();
   go('home');
+  checkUpdate();
 }
 init();
+
+// 版本检查：代码更新后手机自动刷新拿到新版
+function checkUpdate() {
+  fetch('version.txt', { cache: 'no-store' })
+    .then(r => r.ok ? r.text() : null)
+    .then(t => {
+      const v = (t || '').trim();
+      if (!v) return;
+      const seen = localStorage.getItem('yanxitai.seenVersion');
+      if (seen && seen !== v) {
+        toast('发现新版本，正在刷新…');
+        setTimeout(() => location.reload(true), 900);
+      } else {
+        localStorage.setItem('yanxitai.seenVersion', v);
+      }
+    })
+    .catch(() => {});
+}
 
 })();

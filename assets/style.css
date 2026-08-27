@@ -100,6 +100,17 @@ svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.6;stroke
 }
 .icon-btn:hover{color:var(--text);border-color:var(--line);}
 
+/* 云端同步徽标 */
+.sync-badge{
+  align-self:center;font-size:11px;line-height:1;padding:5px 9px;border-radius:999px;
+  border:1px solid var(--line);color:var(--text-3);background:var(--surface-2);white-space:nowrap;
+  transition:.2s;cursor:default;
+}
+.sync--off{color:var(--text-3);}
+.sync--busy{color:var(--sand);border-color:var(--sand);background:rgba(192,168,116,.12);}
+.sync--ok{color:var(--green);border-color:rgba(110,138,114,.4);background:rgba(110,138,114,.1);}
+.sync--err{color:var(--clay);border-color:rgba(176,129,99,.45);background:rgba(176,129,99,.1);}
+
 .scroll{
   flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;
   padding:4px 14px calc(var(--tabbar-h) + var(--safe-b) + 84px);
