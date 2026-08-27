@@ -105,22 +105,34 @@
           </div>
         </div>
 
-        <div class="card">
+        <!-- 站内可编辑日历 -->
+        <div class="card card--cal">
           <div class="card-head">
             <h2>日历</h2>
             <div class="card-tools">
-              <span class="chip-mini" id="calStatus">未连接</span>
-              <button class="ghost-btn" id="calHelpBtn">连接说明</button>
+              <button class="ghost-btn" id="calPrev" title="上一月">‹</button>
+              <span class="chip-mini" id="calMonthLabel">—</span>
+              <button class="ghost-btn" id="calNext" title="下一月">›</button>
+              <button class="soft-btn soft-btn--quiet" id="calToday">今天</button>
+              <label class="soft-btn soft-btn--quiet" title="从 .ics 导入里程碑">.ics<input type="file" id="icsInput" accept=".ics,text/calendar" hidden /></label>
             </div>
           </div>
-          <div class="cal-row">
-            <label class="soft-btn">
-              导入 .ics 日历文件
-              <input type="file" id="icsInput" accept=".ics,text/calendar" hidden />
-            </label>
-            <button class="soft-btn soft-btn--quiet" id="icsClear">清除日历事件</button>
+          <div class="cal-weekdays"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
+          <div class="cal-grid" id="calGrid"></div>
+          <div class="cal-detail" id="calDetail"></div>
+        </div>
+
+        <!-- 今日科研微区 -->
+        <div class="card">
+          <div class="card-head">
+            <h2>今日科研</h2>
+            <button class="ghost-btn" data-goto="research">去科研页</button>
           </div>
-          <div class="cal-events" id="calEvents"></div>
+          <div id="todayResearch" class="today-research"></div>
+          <div class="quick-inspire">
+            <input id="inspireInput" class="mini-input mini-input--grow" placeholder="随手记一条灵感 / 选题…" />
+            <button class="soft-btn soft-btn--solid" id="inspireSave">记一笔</button>
+          </div>
         </div>
 
         <div class="card">
@@ -182,36 +194,63 @@
 
         <div class="card">
           <div class="card-head">
-            <h2>文献库</h2>
+            <h2>论文追踪</h2>
             <div class="card-tools">
-              <span class="chip-mini" id="libCount">0 篇</span>
-              <button class="soft-btn" id="addPaperBtn">＋ 手动添加</button>
-            </div>
-          </div>
-          <div id="libList" class="list list--tight"></div>
-        </div>
-
-        <div class="card">
-          <div class="card-head">
-            <h2>论文与项目</h2>
-            <div class="card-tools">
-              <div class="seg" id="projFilter">
-                <button class="is-active" data-pf="all">全部</button>
-                <button data-pf="paper">论文</button>
-                <button data-pf="project">项目</button>
+              <div class="seg" id="paperTrackFilter">
+                <button class="is-active" data-ptf="active">进行中</button>
+                <button data-ptf="archived">已归档</button>
+                <button data-ptf="all">全部</button>
               </div>
-              <button class="soft-btn" id="addProjBtn">＋ 新建</button>
+              <button class="soft-btn" id="addPaperBtn">＋ 新建论文</button>
             </div>
           </div>
-          <div id="projList" class="proj-wrap"></div>
+          <div id="paperTrackList" class="track-wrap"></div>
         </div>
 
         <div class="card">
           <div class="card-head">
-            <h2>成果记录中心</h2>
+            <h2>项目追踪</h2>
+            <div class="card-tools">
+              <div class="seg" id="projTrackFilter">
+                <button class="is-active" data-prf="active">进行中</button>
+                <button data-prf="archived">已归档</button>
+                <button data-prf="all">全部</button>
+              </div>
+              <button class="soft-btn" id="addProjBtn">＋ 新建项目</button>
+            </div>
+          </div>
+          <div id="projTrackList" class="track-wrap"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>研究方向</h2>
+            <div class="card-tools">
+              <span class="chip-mini" id="dirCount">0 个</span>
+              <button class="soft-btn" id="addDirBtn">＋ 新建方向</button>
+            </div>
+          </div>
+          <div id="dirList" class="dir-wrap"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>研读笔记</h2>
+            <div class="card-tools">
+              <span class="chip-mini" id="noteCount">0 条</span>
+              <button class="soft-btn" id="addNoteBtn">＋ 写笔记</button>
+            </div>
+          </div>
+          <div id="noteList" class="list list--tight"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>成果档案</h2>
             <div class="card-tools">
               <span class="chip-mini" id="archCount">0 项</span>
-              <button class="ghost-btn" id="archExport">导出成果清单</button>
+              <button class="soft-btn" id="addAchBtn">＋ 手动添加</button>
+              <button class="ghost-btn" id="archExport">导出清单</button>
             </div>
           </div>
           <div class="ach-stats" id="achStats"></div>
@@ -224,81 +263,14 @@
       <section class="page" id="page-life">
 
         <div class="seg seg--wide" id="lifeTabs">
-          <button class="is-active" data-life="ledger">记账</button>
-          <button data-life="sport">运动</button>
+          <button class="is-active" data-life="sport">运动</button>
           <button data-life="media">阅读观影</button>
           <button data-life="travel">旅行</button>
-        </div>
-
-        <!-- 记账 -->
-        <div class="life-panel is-active" id="life-ledger">
-          <div class="card card--tight">
-            <div class="card-head">
-              <h2>记一笔</h2>
-              <div class="card-tools">
-                <input type="month" id="ledgerMonth" class="mini-input" />
-              </div>
-            </div>
-            <form class="quick-ledger" id="quickLedger">
-              <div class="seg seg--pill" id="ledgerType">
-                <button type="button" class="is-active" data-lt="out">支出</button>
-                <button type="button" data-lt="in">收入</button>
-              </div>
-              <input type="number" step="0.01" min="0" id="qlAmount" class="mini-input mini-input--amt" placeholder="金额" inputmode="decimal" />
-              <select id="qlCategory" class="mini-input"></select>
-              <input type="date" id="qlDate" class="mini-input" />
-              <input type="text" id="qlNote" class="mini-input mini-input--grow" placeholder="备注（可选）" />
-              <button type="submit" class="soft-btn soft-btn--solid">记录</button>
-            </form>
-          </div>
-
-          <div class="money-grid">
-            <div class="money-card">
-              <div class="stat-label">本月收入</div>
-              <div class="money-value accent-green" id="mIncome">¥0.00</div>
-            </div>
-            <div class="money-card">
-              <div class="stat-label">本月支出</div>
-              <div class="money-value accent-clay" id="mExpense">¥0.00</div>
-            </div>
-            <div class="money-card">
-              <div class="stat-label">本月结余</div>
-              <div class="money-value" id="mBalance">¥0.00</div>
-            </div>
-            <div class="money-card">
-              <div class="stat-label">结余率</div>
-              <div class="money-value" id="mRate">—</div>
-            </div>
-          </div>
-
-          <div class="grid-2">
-            <div class="card">
-              <div class="card-head"><h2>支出结构</h2><span class="chip-mini" id="expenseTotalChip">—</span></div>
-              <div id="expenseBreak" class="break-wrap"></div>
-            </div>
-            <div class="card">
-              <div class="card-head"><h2>收入结构</h2><span class="chip-mini" id="incomeTotalChip">—</span></div>
-              <div id="incomeBreak" class="break-wrap"></div>
-            </div>
-          </div>
-
-          <div class="card">
-            <div class="card-head">
-              <h2>账单明细</h2>
-              <div class="card-tools">
-                <select id="ledgerFilter" class="mini-input">
-                  <option value="all">全部</option>
-                  <option value="out">仅支出</option>
-                  <option value="in">仅收入</option>
-                </select>
-              </div>
-            </div>
-            <div id="ledgerList" class="list list--tight"></div>
-          </div>
+          <button data-life="habit">习惯</button>
         </div>
 
         <!-- 运动 -->
-        <div class="life-panel" id="life-sport">
+        <div class="life-panel is-active" id="life-sport">
           <div class="stat-grid stat-grid--3">
             <div class="stat-card"><div class="stat-label">本月次数</div><div class="stat-value" id="spCount">0</div><div class="stat-sub">运动记录</div></div>
             <div class="stat-card"><div class="stat-label">本月时长</div><div class="stat-value" id="spMin">0</div><div class="stat-sub">分钟</div></div>
@@ -314,7 +286,7 @@
         <div class="life-panel" id="life-media">
           <div class="grid-2">
             <div class="card">
-              <div class="card-head"><h2>阅读</h2><button class="soft-btn" id="addBookBtn">＋ 新增</button></div>
+              <div class="card-head"><h2>阅读</h2><span class="chip-mini" id="bookDeepHint">深度阅读</span><button class="soft-btn" id="addBookBtn">＋ 新增</button></div>
               <div id="bookList" class="list list--tight"></div>
             </div>
             <div class="card">
@@ -329,6 +301,14 @@
           <div class="card">
             <div class="card-head"><h2>旅行计划</h2><button class="soft-btn" id="addTripBtn">＋ 新增</button></div>
             <div id="tripList" class="trip-wrap"></div>
+          </div>
+        </div>
+
+        <!-- 习惯 -->
+        <div class="life-panel" id="life-habit">
+          <div class="card">
+            <div class="card-head"><h2>习惯打卡</h2><button class="soft-btn" id="addHabitBtn">＋ 新增习惯</button></div>
+            <div id="habitList" class="habit-wrap"></div>
           </div>
         </div>
 
@@ -363,10 +343,15 @@
           </div>
         </div>
 
-        <div class="card">
-          <div class="card-head"><h2>收支概览</h2><span class="chip-mini" id="rvMoneyChip">—</span></div>
-          <div id="rvMoney" class="kv-wrap"></div>
-          <div id="rvMoneyBreak" class="break-wrap"></div>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-head"><h2>阅读与思考</h2></div>
+            <div id="rvReading" class="kv-wrap"></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h2>习惯坚持</h2></div>
+            <div id="rvHabit" class="kv-wrap"></div>
+          </div>
         </div>
       </section>
 

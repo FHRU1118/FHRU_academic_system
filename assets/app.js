@@ -1,6 +1,6 @@
 /* ============================================================
-   研习台 · 应用逻辑
-   数据全部保存在浏览器 localStorage
+   研习台 · 应用逻辑 v2.1
+   数据保存在浏览器 localStorage，可选 JSONBin 云端同步
    ============================================================ */
 (function () {
 'use strict';
@@ -36,44 +36,110 @@ const ICON = {
   star: '<svg viewBox="0 0 24 24"><path d="m12 4 2.4 5 5.6.8-4 3.9.9 5.5L12 16.6 7.1 19.2l.9-5.5-4-3.9L9.6 9z"/></svg>'
 };
 
+/* ---------------- 阶段模板 ---------------- */
+const PAPER_STAGES = ['选题构思', '文献综述', '方法设计', '初稿撰写', '修改打磨', '投稿', '审稿返修', '录用', '发表'];
+const PROJECT_KINDS = {
+  academic:   { label: '学术研究', stages: ['立项与资料整理', '知识库搭建', '第一轮论文·产出', '中期评估', '结项与成果'] },
+  competition:{ label: '学科竞赛', stages: ['组队与选题', '方案设计', '实施推进', '提交参赛', '复盘总结'] },
+  internship: { label: '实习实践', stages: ['入职与熟悉', '任务执行', '阶段性交付', '总结汇报'] },
+  custom:     { label: '自定义',   stages: ['阶段一', '阶段二', '阶段三', '阶段四'] }
+};
+const ACH_TYPES = [
+  { v: 'paper', l: '论文' }, { v: 'project', l: '项目' },
+  { v: 'competition', l: '竞赛获奖' }, { v: 'conference', l: '会议报告' }, { v: 'other', l: '其他' }
+];
+
 /* ---------------- 数据层 ---------------- */
-const KEY = 'yanxitai.v1';
+const KEY = 'yanxitai.v2';
 const DEFAULT_STATE = {
-  version: 1,
+  version: 2,
   savedAt: 0,
   settings: { theme: 'light', paperShift: 0, nick: '', feedMode: 'live', binId: '', apiKey: '' },
   tasks: [],
   inbox: [],
-  library: [],
+  calendar: [],
+  papers: [],
   projects: [],
+  directions: [],
+  researchNotes: [],
+  achievements: [],
   sports: [],
   books: [],
   movies: [],
   trips: [],
-  ledger: []
+  habits: []
 };
-const CAT_OUT = ['餐饮', '交通', '住房', '学习科研', '购物', '医疗', '娱乐', '人情往来', '通讯', '其他'];
-const CAT_IN = ['奖学金', '助研津贴', '兼职收入', '家庭支持', '投资理财', '报销回款', '其他'];
-const STAGES = ['选题构思', '文献综述', '数据收集', '模型/实证', '初稿撰写', '修改润色', '投稿送审', '返修中', '结项验收'];
 
 let S = load();
 
 function load() {
   try {
-    const raw = localStorage.getItem(KEY);
+    let raw = localStorage.getItem(KEY);
+    let fromOld = false;
+    if (!raw) {
+      const old = localStorage.getItem('yanxitai.v1');
+      if (old) { raw = old; fromOld = true; }
+    }
     if (!raw) return structuredClone(DEFAULT_STATE);
-    const o = JSON.parse(raw);
-    return normalize(Object.assign(structuredClone(DEFAULT_STATE), o, {
-      settings: Object.assign({}, DEFAULT_STATE.settings, o.settings || {})
-    }));
+    const parsed = JSON.parse(raw);
+    const st = Object.assign(structuredClone(DEFAULT_STATE), parsed, {
+      settings: Object.assign({}, DEFAULT_STATE.settings, parsed.settings || {})
+    });
+    if (fromOld) migrateV1(st, parsed);
+    return normalize(st);
   } catch (e) { return structuredClone(DEFAULT_STATE); }
 }
+
+/* v1 (yanxitai.v1) → v2 迁移：拆分项目、ics 任务转日历事件 */
+function migrateV1(st, old) {
+  st.tasks = (old.tasks || []).filter(t => t.source !== 'ics');
+  st.papers = []; st.projects = [];
+  (old.projects || []).forEach(p => {
+    const base = {
+      id: p.id || uid(), title: p.title || '', progress: Number(p.progress) || 0,
+      deadline: p.deadline || '', next: p.next || '', note: p.note || '',
+      status: p.status || 'active', archivedAt: p.archivedAt || '', outcome: p.outcome || '', directionId: ''
+    };
+    if (p.type === 'paper') st.papers.push(Object.assign(base, { targetJournal: p.targetJournal || '', stages: PAPER_STAGES.slice(), stageIdx: Math.max(0, PAPER_STAGES.indexOf(p.stage || '')) }));
+    else st.projects.push(Object.assign(base, { kind: 'academic', stages: PROJECT_KINDS.academic.stages.slice(), stageIdx: 0 }));
+  });
+  (old.tasks || []).filter(t => t.source === 'ics').forEach(t => {
+    st.calendar.push({ id: uid(), title: t.title || '日历事件', date: t.date || todayStr(), end: '', type: '其他', note: t.note || '' });
+  });
+}
 function normalize(st) {
-  ['tasks', 'inbox', 'library', 'projects', 'sports', 'books', 'movies', 'trips', 'ledger']
-    .forEach(k => { if (!Array.isArray(st[k])) st[k] = []; });
-  st.ledger.forEach(r => { r.amount = Number(r.amount) || 0; r.date = r.date || todayStr(); });
-  st.sports.forEach(r => { r.minutes = Number(r.minutes) || 0; });
-  st.projects.forEach(p => { p.progress = Number(p.progress) || 0; });
+  Object.keys(DEFAULT_STATE).forEach(k => { if (!Array.isArray(st[k])) st[k] = []; });
+  /* 兼容 v1 老数据：把旧 projects（含 paper/project 两类）拆到 papers / projects */
+  if (st.projects && st.projects.some(p => p.type && !p.kind && p.status !== undefined && 'stage' in p)) {
+    const legacy = st.projects.filter(p => p.type);
+    legacy.forEach(p => {
+      const base = {
+        id: p.id || uid(), title: p.title || '', progress: Number(p.progress) || 0,
+        deadline: p.deadline || '', next: p.next || '', note: p.note || '',
+        status: p.status || 'active', archivedAt: p.archivedAt || '', outcome: p.outcome || '', directionId: ''
+      };
+      if (p.type === 'paper') {
+        st.papers.push(Object.assign(base, { targetJournal: p.targetJournal || '', stages: PAPER_STAGES.slice(), stageIdx: Math.max(0, PAPER_STAGES.indexOf(p.stage)) }));
+      } else {
+        st.projects2 = st.projects2 || [];
+        st.projects2.push(Object.assign(base, { kind: 'academic', stages: PROJECT_KINDS.academic.stages.slice(), stageIdx: 0 }));
+      }
+    });
+    if (st.projects2) { st.projects = st.projects2; delete st.projects2; }
+    else st.projects = st.projects.filter(p => !p.type);
+  }
+  st.tasks.forEach(t => { t.done = !!t.done; if (!t.id) t.id = uid(); });
+  st.papers.forEach(p => {
+    if (!Array.isArray(p.stages) || !p.stages.length) p.stages = PAPER_STAGES.slice();
+    if (typeof p.stageIdx !== 'number') p.stageIdx = Math.min(p.stages.length - 1, Math.max(0, p.stages.indexOf(p.stage || '')));
+    p.progress = Number(p.progress) || 0;
+  });
+  st.projects.forEach(p => {
+    if (!Array.isArray(p.stages) || !p.stages.length) p.stages = (PROJECT_KINDS[p.kind] || PROJECT_KINDS.academic).stages.slice();
+    if (typeof p.stageIdx !== 'number') p.stageIdx = Math.min(p.stages.length - 1, Math.max(0, p.stages.indexOf(p.stage || '')));
+    p.progress = Number(p.progress) || 0;
+  });
+  st.habits.forEach(h => { if (!h.records || typeof h.records !== 'object') h.records = {}; });
   return st;
 }
 let saveTimer = null;
@@ -87,7 +153,6 @@ function save() {
   }, 60);
 }
 
-// 用云端状态覆盖本地（保留云端同步凭据，避免被旧空值覆盖）
 function adoptCloud(cloud) {
   S = normalize(Object.assign(structuredClone(DEFAULT_STATE), cloud, {
     settings: Object.assign({}, DEFAULT_STATE.settings, cloud.settings || {})
@@ -96,19 +161,11 @@ function adoptCloud(cloud) {
   renderAll();
 }
 
-// 同步状态徽标
 function updateSyncBadge(status, detail) {
   const b = $('#syncBadge'); if (!b) return;
-  const map = {
-    off: ['未同步', 'sync--off'],
-    syncing: ['同步中', 'sync--busy'],
-    ok: ['已同步', 'sync--ok'],
-    error: ['同步异常', 'sync--err']
-  };
+  const map = { off: ['未同步', 'sync--off'], syncing: ['同步中', 'sync--busy'], ok: ['已同步', 'sync--ok'], error: ['同步异常', 'sync--err'] };
   const [txt, cls] = map[status] || ['', ''];
-  b.className = 'sync-badge ' + cls;
-  b.textContent = txt;
-  b.title = detail || txt;
+  b.className = 'sync-badge ' + cls; b.textContent = txt; b.title = detail || txt;
 }
 
 /* ---------------- 提示 ---------------- */
@@ -139,13 +196,8 @@ function openModal(title, bodyNode, footNodes) {
   $('#modalMask').classList.add('show');
 }
 function closeModal() { $('#modalMask').classList.remove('show'); }
-
 function btn(text, cls, fn) { const b = el(`<button class="soft-btn ${cls || ''}">${esc(text)}</button>`); b.onclick = fn; return b; }
 
-/**
- * 通用表单弹窗
- * fields: [{k,label,type,options,ph,rows,full,min,max,step}]
- */
 function openForm(title, fields, values, onSubmit) {
   const form = el('<form></form>');
   fields.forEach(f => {
@@ -162,7 +214,10 @@ function openForm(title, fields, values, onSubmit) {
   form.addEventListener('submit', e => e.preventDefault());
   const ok = btn('保存', 'soft-btn--solid', () => {
     const data = {};
-    fields.forEach(f => { data[f.k] = form.elements[f.k].value.trim(); });
+    fields.forEach(f => {
+      let val = form.elements[f.k].value;
+      data[f.k] = f.trim === false ? val : val.trim();
+    });
     if (onSubmit(data) !== false) closeModal();
   });
   openModal(title, form, [btn('取消', 'soft-btn--quiet', closeModal), ok]);
@@ -192,6 +247,7 @@ function go(page) {
    首页
    ============================================================ */
 let taskFilter = 'today';
+const CAL_TYPE_COLOR = { 科研: 'var(--clay)', 生活: 'var(--green)', 其他: 'var(--line-strong)' };
 
 function taskInRange(t) {
   const today = todayStr();
@@ -219,38 +275,31 @@ function renderHome() {
   $('#statRate').textContent = rate + '%';
   $('#ringFg').style.strokeDashoffset = String(113 - 113 * rate / 100);
 
-  /* 日历事件 */
-  const evts = S.tasks.filter(t => t.source === 'ics' && t.date >= today)
-    .sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || ''))).slice(0, 6);
-  $('#calStatus').textContent = S.tasks.some(t => t.source === 'ics') ? '已导入' : '未连接';
-  const ce = $('#calEvents');
-  ce.innerHTML = evts.length ? '' : '<div class="empty">尚未导入日历事件</div>';
-  evts.forEach(e => {
-    const dd = dayDiff(e.date, today);
-    const label = dd === 0 ? '今天' : dd === 1 ? '明天' : e.date.slice(5);
-    ce.appendChild(el(`<div class="cal-event"><i></i><div style="flex:1;min-width:0"><div>${esc(e.title)}</div><div class="t">${label} ${esc(e.time || '全天')}</div></div></div>`));
-  });
+  renderCalendar();
+  renderTodayResearch();
 
-  /* 任务列表 */
   const list = $('#taskList');
   const items = S.tasks.filter(taskInRange)
     .sort((a, b) => (a.done - b.done) || (a.date || '9999').localeCompare(b.date || '9999') || (a.time || '').localeCompare(b.time || ''));
   list.innerHTML = items.length ? '' : `<div class="empty">${taskFilter === 'today' ? '今天还没有任务，点右下角加一条' : '暂无任务'}</div>`;
   items.forEach(t => list.appendChild(taskRow(t, today)));
 
-  /* 临近截止 */
   const dl = $('#deadlineList');
-  const soon = S.projects.filter(p => p.status !== 'archived' && p.deadline)
+  const tracks = [...S.papers, ...S.projects];
+  const soon = tracks.filter(p => p.status !== 'archived' && p.deadline)
     .map(p => ({ p, d: dayDiff(p.deadline, today) }))
     .filter(x => x.d <= 45).sort((a, b) => a.d - b.d).slice(0, 5);
   dl.innerHTML = soon.length ? '' : '<div class="empty">近期没有截止事项</div>';
   soon.forEach(({ p, d }) => {
     const tag = d < 0 ? `已逾期 ${-d} 天` : d === 0 ? '今天截止' : `还剩 ${d} 天`;
-    dl.appendChild(el(`<div class="row"><div class="row-main"><div class="row-title">${esc(p.title)}</div>
-      <div class="row-meta"><span class="chip-tag">${esc(p.stage || '进行中')}</span><span class="due" style="${d <= 3 ? 'color:var(--clay)' : ''}">${tag}</span><span>${p.progress || 0}%</span></div></div></div>`));
+    const kind = S.papers.includes(p) ? '论文' : '项目';
+    dl.appendChild(el(`<div class="row"><div class="row-main">
+      <div class="row-title">${esc(p.title)}</div>
+      <div class="row-meta"><span class="chip-tag">${kind}·${esc(p.stages[p.stageIdx] || '进行中')}</span>
+        <span class="due" style="${d <= 3 ? 'color:var(--clay)' : ''}">${tag}</span><span>${p.progress || 0}%</span></div>
+    </div></div>`));
   });
 
-  /* 收集箱 */
   const ib = $('#inboxList');
   $('#inboxCount').textContent = S.inbox.length + ' 条';
   const recent = S.inbox.slice(0, 4);
@@ -266,7 +315,6 @@ function taskRow(t, today) {
       <div class="row-title">${esc(t.title)}</div>
       <div class="row-meta">
         ${t.tag ? `<span class="chip-tag">${esc(t.tag)}</span>` : ''}
-        ${t.source === 'ics' ? '<span class="chip-tag">日历</span>' : ''}
         <span class="due">${esc(t.date || '未排期')}${t.time ? ' ' + esc(t.time) : ''}</span>
         ${t.note ? `<span>${esc(t.note)}</span>` : ''}
       </div>
@@ -318,14 +366,77 @@ function editTask(t) {
   });
 }
 
-/* ---------------- ICS 解析 ---------------- */
+/* ---- 站内日历 ---- */
+let calYear = new Date().getFullYear(), calMonth = new Date().getMonth(), calSelDate = todayStr();
+
+function renderCalendar() {
+  $('#calMonthLabel').textContent = `${calYear} 年 ${calMonth + 1} 月`;
+  const grid = $('#calGrid'); grid.innerHTML = '';
+  const first = new Date(calYear, calMonth, 1);
+  const startW = (first.getDay() + 6) % 7;
+  const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+  const today = todayStr();
+  // 收集标记
+  const marks = {};
+  const addMark = (date, kind) => { if (date) (marks[date] = marks[date] || new Set()).add(kind); };
+  S.tasks.forEach(t => { if (t.date) addMark(t.date, 'task'); });
+  [...S.papers, ...S.projects].forEach(p => { if (p.deadline && p.status !== 'archived') addMark(p.deadline, 'deadline'); });
+  S.calendar.forEach(e => { if (e.date) addMark(e.date, 'event'); });
+
+  for (let i = 0; i < startW; i++) grid.appendChild(el('<div class="cal-cell cal-cell--empty"></div>'));
+  for (let d = 1; d <= daysInMonth; d++) {
+    const ds = `${calYear}-${pad(calMonth + 1)}-${pad(d)}`;
+    const m = marks[ds];
+    const dots = m ? Array.from(m).map(k => `<i class="cal-dot cal-dot--${k}"></i>`).join('') : '';
+    const cell = el(`<div class="cal-cell ${ds === today ? 'is-today' : ''} ${ds === calSelDate ? 'is-sel' : ''}" data-date="${ds}">
+      <span class="cal-day">${d}</span><div class="cal-dots">${dots}</div></div>`);
+    cell.onclick = () => { calSelDate = ds; renderCalendar(); renderCalDetail(); };
+    grid.appendChild(cell);
+  }
+  renderCalDetail();
+}
+
+function renderCalDetail() {
+  const box = $('#calDetail');
+  const date = calSelDate;
+  const tasks = S.tasks.filter(t => t.date === date);
+  const dls = [...S.papers, ...S.projects].filter(p => p.deadline === date && p.status !== 'archived');
+  const evts = S.calendar.filter(e => e.date === date);
+  let html = `<div class="cal-detail-head"><span>${date.slice(5)}</span>
+    <button class="soft-btn soft-btn--quiet" id="calAddEvt">＋ 添加阶段性事件</button></div>`;
+  if (!tasks.length && !dls.length && !evts.length) html += '<div class="empty">这一天暂无安排</div>';
+  const sec = (label, arr, render) => arr.length ? `<div class="cal-sec"><div class="cal-sec-label">${label}</div>${arr.map(render).join('')}</div>` : '';
+  html += sec('任务', tasks, t => `<div class="cal-item"><i class="cal-dot cal-dot--task"></i><span class="${t.done ? 'cal-done' : ''}">${esc(t.title)}</span></div>`);
+  html += sec('截止', dls, p => `<div class="cal-item"><i class="cal-dot cal-dot--deadline"></i><span>${esc(p.title)} <em>${esc(p.stages[p.stageIdx] || '')}</em></span></div>`);
+  html += sec('事件', evts, e => `<div class="cal-item"><i class="cal-dot cal-dot--event"></i><span>${esc(e.title)} ${e.type ? `<em class="cal-ev-type">${esc(e.type)}</em>` : ''}</span>
+    <button class="mini-icon ed" data-ev="${e.id}" title="编辑">${ICON.edit}</button>
+    <button class="mini-icon del" data-evd="${e.id}" title="删除">${ICON.del}</button></div>`);
+  box.innerHTML = html;
+  $('#calAddEvt').onclick = () => editCalEvent(null, date);
+  box.querySelectorAll('[data-ev]').forEach(b => b.onclick = () => { const ev = S.calendar.find(x => x.id === b.dataset.ev); if (ev) editCalEvent(ev); });
+  box.querySelectorAll('[data-evd]').forEach(b => b.onclick = () => confirmDel('这条阶段性事件', () => { S.calendar = S.calendar.filter(x => x.id !== b.dataset.evd); save(); renderCalendar(); }));
+}
+
+function editCalEvent(e, prefillDate) {
+  const isNew = !e;
+  const v = e || { title: '', date: prefillDate || calSelDate, end: '', type: '科研', note: '' };
+  openForm(isNew ? '添加阶段性事件' : '编辑事件', [
+    { k: 'title', label: '标题', ph: '例：开题答辩 / 组会汇报' },
+    { k: 'date', label: '日期', type: 'date' },
+    { k: 'end', label: '结束日（可选）', type: 'date' },
+    { k: 'type', label: '类型', type: 'select', options: ['科研', '生活', '其他'] },
+    { k: 'note', label: '备注', type: 'textarea', rows: 2 }
+  ], v, d => {
+    if (!d.title) { toast('请填写标题'); return false; }
+    if (isNew) S.calendar.unshift({ id: uid(), ...d }); else Object.assign(e, d);
+    save(); renderCalendar(); toast(isNew ? '已添加' : '已更新');
+  });
+}
+
 function parseICS(text) {
   const lines = text.replace(/\r\n/g, '\n').split('\n');
   const unfolded = [];
-  lines.forEach(l => {
-    if (/^[ \t]/.test(l) && unfolded.length) unfolded[unfolded.length - 1] += l.slice(1);
-    else unfolded.push(l);
-  });
+  lines.forEach(l => { if (/^[ \t]/.test(l) && unfolded.length) unfolded[unfolded.length - 1] += l.slice(1); else unfolded.push(l); });
   const events = []; let cur = null;
   unfolded.forEach(line => {
     if (line.startsWith('BEGIN:VEVENT')) { cur = {}; return; }
@@ -336,65 +447,53 @@ function parseICS(text) {
     const key = rawKey.split(';')[0].toUpperCase();
     const unescape = s => s.replace(/\\n/gi, ' ').replace(/\\,/g, ',').replace(/\\;/g, ';').replace(/\\\\/g, '\\');
     if (key === 'SUMMARY') cur.title = unescape(val);
-    else if (key === 'UID') cur.uid = val;
-    else if (key === 'LOCATION') cur.loc = unescape(val);
     else if (key === 'DTSTART') {
       const m = val.match(/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})(Z)?)?/);
-      if (m) {
-        if (m[4]) {
-          let d = m[7] ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]))
-                       : new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
-          cur.date = ymd(d); cur.time = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-        } else { cur.date = `${m[1]}-${m[2]}-${m[3]}`; cur.time = ''; }
-      }
+      if (m) { cur.date = m[4] ? `${m[1]}-${m[2]}-${m[3]}` : `${m[1]}-${m[2]}-${m[3]}`; }
     }
   });
   return events;
 }
-
 function importICS(file) {
   const fr = new FileReader();
   fr.onload = () => {
-    let evts;
-    try { evts = parseICS(String(fr.result)); }
-    catch (e) { toast('文件解析失败'); return; }
+    let evts; try { evts = parseICS(String(fr.result)); } catch (e) { toast('文件解析失败'); return; }
     if (!evts.length) { toast('未在文件中找到日程'); return; }
-    const today = todayStr();
-    const limit = ymd(new Date(Date.now() + 120 * 86400000));
-    const exist = new Set(S.tasks.filter(t => t.icsUid).map(t => t.icsUid));
     let n = 0;
     evts.forEach(e => {
-      if (!e.date || e.date < today || e.date > limit) return;
-      const key = (e.uid || '') + e.date + e.title;
-      if (exist.has(key)) return;
-      exist.add(key);
-      S.tasks.push({ id: uid(), title: e.title, date: e.date, time: e.time || '', done: false, tag: '', note: e.loc || '', source: 'ics', icsUid: key });
+      if (!e.date) return;
+      if (S.calendar.some(x => x.title === e.title && x.date === e.date)) return;
+      S.calendar.push({ id: uid(), title: e.title, date: e.date, end: '', type: '其他', note: '' });
       n++;
     });
-    save(); renderAll();
-    toast(n ? `已导入 ${n} 条日程` : '没有新的日程可导入');
+    save(); renderCalendar(); toast(n ? `已导入 ${n} 条里程碑` : '没有新的日程可导入');
   };
   fr.readAsText(file, 'utf-8');
 }
 
-function calHelp() {
-  openModal('把 iPhone 日历接进来', `<div class="help-block">
-    <p>浏览器出于隐私限制无法直接读取苹果日历，用下面任一方式一次性导入即可，导入后的日程会进入任务列表并计入完成率。</p>
-    <p><b>方式一 · iPhone 快捷指令（推荐）</b></p>
-    <ol>
-      <li>打开「快捷指令」→ 新建一个快捷指令；</li>
-      <li>添加动作「查找日历事件」，筛选条件设为<code>开始日期 · 在接下来 30 天内</code>；</li>
-      <li>添加动作「文本」，内容选中上一步结果；再添加「存储到文件」，文件名以 <code>.ics</code> 结尾；</li>
-      <li>运行后在本页点「导入 .ics 日历文件」选择该文件。</li>
-    </ol>
-    <p><b>方式二 · Mac / iCloud 导出</b></p>
-    <ol>
-      <li>Mac 上打开「日历」App，选中日历 → 菜单栏「文件 → 导出 → 导出…」；</li>
-      <li>得到 <code>.ics</code> 文件后在本页导入。</li>
-    </ol>
-    <p><b>方式三 · 手动添加</b>：直接用任务卡片的「＋ 新增」录入，同样支持日期与时间。</p>
-    <p style="color:var(--text-3)">提示：重复导入不会产生重复条目；只导入今天起 120 天内的日程。</p>
-  </div>`, [btn('知道了', 'soft-btn--solid', closeModal)]);
+/* ---- 今日科研微区 ---- */
+function renderTodayResearch() {
+  const box = $('#todayResearch');
+  let pair = [];
+  if (feedPool && feedPool.length) pair = pickLivePair();
+  else if (PAPER_SEEDS && PAPER_SEEDS.length) pair = dailyPapers();
+  if (!pair.length) { box.innerHTML = '<div class="empty">今天还没有推荐，去科研页刷新</div>'; return; }
+  box.innerHTML = '';
+  pair.forEach(p => {
+    const title = p.t || p.title || '';
+    const row = el(`<div class="tr-item"><span class="tr-dot"></span>
+      <span class="tr-title">${esc(title).slice(0, 38)}</span>
+      <span class="tr-go" data-goto="research">去读 →</span></div>`);
+    row.querySelector('[data-goto]').onclick = () => go('research');
+    box.appendChild(row);
+  });
+}
+
+function saveInspire() {
+  const v = $('#inspireInput').value.trim();
+  if (!v) { toast('先写点什么吧'); return; }
+  S.inbox.unshift({ id: uid(), text: v, tag: '灵感', createdAt: new Date().toISOString() });
+  $('#inspireInput').value = ''; save(); renderHome(); toast('已存入收集箱');
 }
 
 /* ============================================================
@@ -425,36 +524,17 @@ function paperCard(p, idx) {
       <div class="paper-sec"><h4>理论框架与贡献</h4><p>${esc(p.th)}</p></div>
       <div class="paper-sec paper-sec--rel"><h4>与你的方向（技术经济与管理）</h4><p>${esc(p.rel)}</p></div>
       <div class="paper-foot">
-        <button class="soft-btn fav">＋ 收入文献库</button>
-        <a class="soft-btn soft-btn--quiet" target="_blank" rel="noopener"
-           href="https://scholar.google.com/scholar?q=${encodeURIComponent(p.en)}">学术检索</a>
-        <button class="soft-btn soft-btn--quiet note">写读书笔记</button>
+        <button class="soft-btn note">＋ 记笔记</button>
+        <a class="soft-btn soft-btn--quiet" target="_blank" rel="noopener" href="https://scholar.google.com/scholar?q=${encodeURIComponent(p.en)}">学术检索</a>
       </div>
     </div>
   </article>`);
-  const top = c.querySelector('.paper-top');
-  top.onclick = () => {
+  c.querySelector('.paper-top').onclick = () => {
     c.classList.toggle('open');
     c.querySelector('.paper-toggle').textContent = c.classList.contains('open') ? '收起 ↑' : '展开全文要点 ↓';
   };
-  c.querySelector('.fav').onclick = e => { e.stopPropagation(); addToLibrary(p); };
-  c.querySelector('.note').onclick = e => { e.stopPropagation(); addToLibrary(p, true); };
+  c.querySelector('.note').onclick = e => { e.stopPropagation(); openNoteForPaper({ title: p.en || p.t, label: p.t }); };
   return c;
-}
-
-function addToLibrary(p, withNote) {
-  let item = S.library.find(x => x.en === p.en);
-  if (!item) {
-    item = { id: uid(), t: p.t, en: p.en, a: p.a, j: p.j, y: p.y, note: '', addedAt: todayStr() };
-    S.library.unshift(item); save(); renderAll(); toast('已收入文献库');
-  } else if (!withNote) { toast('文献库中已有这篇'); }
-  if (withNote) editLibNote(item);
-}
-
-function editLibNote(item) {
-  openForm('读书笔记 · ' + item.t.slice(0, 18), [
-    { k: 'note', label: '笔记 / 可借鉴之处', type: 'textarea', rows: 6, ph: '这篇对我的选题有什么用？变量怎么测？方法能不能搬？' }
-  ], item, d => { item.note = d.note; save(); renderAll(); toast('笔记已保存'); });
 }
 
 /* ---- 实时推荐（OpenAlex） ---- */
@@ -478,25 +558,17 @@ function livePaperCard(p) {
       ${p.methods && p.methods.length ? `<div class="paper-sec"><h4>方法信号</h4><p>${p.methods.map(m => `<span class="chip-tag" style="margin-right:6px">${esc(m)}</span>`).join('')}</p></div>` : ''}
       <div class="paper-sec paper-sec--rel"><h4>与你的方向（技术经济与管理）</h4><p>${esc(p.rel)}</p></div>
       <div class="paper-foot">
-        <button class="soft-btn fav">＋ 收入文献库</button>
+        <button class="soft-btn note">＋ 记笔记</button>
         ${p.doi ? `<a class="soft-btn soft-btn--quiet" target="_blank" rel="noopener" href="${esc(p.doi)}">原文 DOI</a>` : ''}
-        <a class="soft-btn soft-btn--quiet" target="_blank" rel="noopener"
-           href="https://scholar.google.com/scholar?q=${encodeURIComponent(p.title)}">学术检索</a>
+        <a class="soft-btn soft-btn--quiet" target="_blank" rel="noopener" href="https://scholar.google.com/scholar?q=${encodeURIComponent(p.title)}">学术检索</a>
       </div>
     </div>
   </article>`);
-  const top = c.querySelector('.paper-top');
-  top.onclick = () => {
+  c.querySelector('.paper-top').onclick = () => {
     c.classList.toggle('open');
     c.querySelector('.paper-toggle').textContent = c.classList.contains('open') ? '收起 ↑' : '展开摘要与解析 ↓';
   };
-  c.querySelector('.fav').onclick = e => {
-    e.stopPropagation();
-    if (S.library.some(x => x.en === p.title)) { toast('文献库中已有这篇'); return; }
-    const trc = Translator.cached(p.id);
-    S.library.unshift({ id: uid(), t: (trc && trc.t) || p.title, en: p.title, a: p.authors, j: p.journal, y: (p.date || '').slice(0, 4), note: '', addedAt: todayStr() });
-    save(); renderAll(); toast('已收入文献库');
-  };
+  c.querySelector('.note').onclick = e => { e.stopPropagation(); openNoteForPaper({ title: p.title, label: p.title }); };
   if (!tr) hydrateTranslation(p, c);
   return c;
 }
@@ -504,28 +576,38 @@ function livePaperCard(p) {
 function hydrateTranslation(p, card) {
   Translator.paper(p.id, p.title, p.abstract).then(tr => {
     if (!card.isConnected) return;
-    const zt = card.querySelector('.zh-title');
-    const za = card.querySelector('.zh-abs');
+    const zt = card.querySelector('.zh-title'), za = card.querySelector('.zh-abs');
     if (zt) zt.textContent = tr.t;
     if (za) { za.textContent = tr.a; za.style.color = ''; }
   }).catch(() => {
     const za = card.querySelector('.zh-abs');
     if (za && card.isConnected) {
       za.innerHTML = '翻译暂不可用（网络原因），请阅读下方原文，或 <button class="ghost-btn" style="color:var(--accent)">重试</button>';
-      za.querySelector('button').onclick = () => {
-        za.textContent = '翻译中…';
-        hydrateTranslation(p, card);
-      };
+      za.querySelector('button').onclick = () => { za.textContent = '翻译中…'; hydrateTranslation(p, card); };
     }
+  });
+}
+
+function boostByDirections(pool) {
+  if (!S.directions.length) return pool;
+  const kws = S.directions.flatMap(d => (d.keywords || '').split(/[,，\s]+/).filter(Boolean));
+  if (!kws.length) return pool;
+  return pool.slice().sort((a, b) => {
+    const score = it => {
+      const hay = ((it.title || '') + ' ' + (it.abstract || '') + ' ' + (it.topics || []).join(' ')).toLowerCase();
+      return kws.filter(k => hay.includes(k.toLowerCase())).length;
+    };
+    return score(b) - score(a);
   });
 }
 
 function pickLivePair() {
   if (!feedPool || !feedPool.length) return [];
-  const pairs = Math.max(1, Math.floor(feedPool.length / 2));
+  const pool = boostByDirections(feedPool);
+  const pairs = Math.max(1, Math.floor(pool.length / 2));
   const dayNum = Math.floor(new Date(todayStr()).getTime() / 86400000);
   const idx = ((dayNum + (S.settings.paperShift || 0)) % pairs + pairs) % pairs;
-  return feedPool.slice(idx * 2, idx * 2 + 2);
+  return pool.slice(idx * 2, idx * 2 + 2);
 }
 
 function renderPaperDaily() {
@@ -533,17 +615,13 @@ function renderPaperDaily() {
   const mode = S.settings.feedMode || 'live';
   $$('#paperMode button').forEach(b => b.classList.toggle('is-active', b.dataset.pm === mode));
   $('#paperRefresh').style.display = mode === 'live' ? '' : 'none';
-
   if (mode === 'seed') {
-    wrap.innerHTML = '';
-    $('#paperDate').textContent = todayStr().slice(5) + ' · 经典库';
+    wrap.innerHTML = ''; $('#paperDate').textContent = todayStr().slice(5) + ' · 经典库';
     dailyPapers().forEach(p => wrap.appendChild(paperCard(p)));
     return;
   }
-  /* live 模式 */
   if (feedPool) {
-    wrap.innerHTML = '';
-    $('#paperDate').textContent = todayStr().slice(5) + ' · 实时';
+    wrap.innerHTML = ''; $('#paperDate').textContent = todayStr().slice(5) + ' · 实时';
     const pair = pickLivePair();
     if (!pair.length) { wrap.innerHTML = '<div class="empty">近 45 天暂无可推荐的新论文</div>'; return; }
     pair.forEach(p => wrap.appendChild(livePaperCard(p)));
@@ -566,238 +644,266 @@ function loadFeed(force) {
   if (feedLoading) return;
   feedLoading = true; feedError = false;
   if (force) { Feed.clearCache(); feedPool = null; renderPaperDaily(); }
-  Feed.fetchLatest(todayStr(), !!force).then(r => {
-    feedPool = r.pool;
-    feedLoading = false;
-    if (currentPage === 'research') renderPaperDaily();
-    if (!r.fromCache) toast(`已获取 ${r.pool.length} 篇近期顶刊论文`);
-  }).catch(() => {
-    feedLoading = false; feedError = true;
-    if (currentPage === 'research') renderPaperDaily();
+  Feed.fetchLatest(todayStr(), !!force).then(r => { feedPool = r.pool; feedLoading = false; if (currentPage === 'research') renderPaperDaily(); if (!r.fromCache) toast(`已获取 ${r.pool.length} 篇近期顶刊论文`); })
+    .catch(() => { feedLoading = false; feedError = true; if (currentPage === 'research') renderPaperDaily(); });
+}
+
+/* ---- 研读笔记 ---- */
+function openNoteForPaper(p) {
+  openNoteEditor({ paperTitle: p.title });
+}
+function openNoteEditor(prefill) {
+  const v = prefill || {};
+  openForm('写研读笔记', [
+    { k: 'text', label: '笔记内容', type: 'textarea', rows: 5, ph: '这篇的关键想法 / 可借鉴的方法 / 对我的选题有什么用', def: v.text || '' },
+    { k: 'paperTitle', label: '关联论文（可选）', ph: '论文标题', def: v.paperTitle || '' },
+    { k: 'directionId', label: '关联方向（可选）', type: 'select', options: [{ v: '', l: '不关联' }].concat(S.directions.map(d => ({ v: d.id, l: d.name }))) }
+  ], v, d => {
+    if (!d.text.trim() && !d.paperTitle.trim()) { toast('写点内容吧'); return false; }
+    S.researchNotes.unshift({ id: uid(), text: d.text.trim(), paperTitle: d.paperTitle.trim(), directionId: d.directionId || '', createdAt: new Date().toISOString() });
+    save(); renderResearch(); toast('笔记已保存');
   });
 }
 
-function renderResearch() {
-  /* 每日推荐 */
-  renderPaperDaily();
+/* ---- 论文 / 项目 追踪 ---- */
+let paperTrackFilter = 'active', projTrackFilter = 'active';
 
-  /* 文献库 */
-  const lib = $('#libList'); $('#libCount').textContent = S.library.length + ' 篇';
-  lib.innerHTML = S.library.length ? '' : '<div class="empty">还没有收藏文献，点推荐卡片的「收入文献库」</div>';
-  S.library.forEach(it => {
-    const r = el(`<div class="row"><div class="row-main">
-      <div class="row-title">${esc(it.t)}</div>
-      <div class="row-meta"><span>${esc(it.j)} · ${it.y}</span><span>${esc(it.a)}</span></div>
-      ${it.note ? `<div class="row-meta" style="color:var(--text-2);margin-top:5px">📝 ${esc(it.note)}</div>` : ''}
-    </div><div class="row-actions">
-      <button class="mini-icon ed" title="笔记">${ICON.edit}</button>
-      <button class="mini-icon del" title="移除">${ICON.del}</button>
-    </div></div>`);
-    r.querySelector('.ed').onclick = () => editLibNote(it);
-    r.querySelector('.del').onclick = () => confirmDel(`文献「${it.t}」`, () => { S.library = S.library.filter(x => x.id !== it.id); save(); renderAll(); });
-    lib.appendChild(r);
-  });
-
-  /* 项目看板 */
-  const pw = $('#projList'); pw.innerHTML = '';
-  const active = S.projects.filter(p => p.status !== 'archived' && (projFilter === 'all' || p.type === projFilter));
-  if (!active.length) pw.innerHTML = '<div class="empty">暂无进行中的论文或项目</div>';
-  active.sort((a, b) => (a.deadline || '9999').localeCompare(b.deadline || '9999')).forEach(p => pw.appendChild(projCard(p)));
-
-  /* 成果中心 */
-  const arch = S.projects.filter(p => p.status === 'archived');
-  $('#archCount').textContent = arch.length + ' 项';
-  const papersN = arch.filter(p => p.type === 'paper').length;
-  const projN = arch.filter(p => p.type === 'project').length;
-  $('#achStats').innerHTML = `
-    <div class="ach-stat"><b>${arch.length}</b><span>累计成果</span></div>
-    <div class="ach-stat"><b class="accent-blue">${papersN}</b><span>论文</span></div>
-    <div class="ach-stat"><b class="accent-green">${projN}</b><span>项目</span></div>`;
-  const al = $('#archList');
-  al.innerHTML = arch.length ? '' : '<div class="empty">完成论文或项目后点「归档」，成果会沉淀在这里</div>';
-  arch.sort((a, b) => (b.archivedAt || '').localeCompare(a.archivedAt || '')).forEach(p => {
-    const r = el(`<div class="row"><div class="row-main">
-      <div class="row-title">${esc(p.title)}</div>
-      <div class="row-meta"><span class="chip-tag">${p.type === 'paper' ? '论文' : '项目'}</span>
-        <span>归档于 ${esc(p.archivedAt || '—')}</span>${p.outcome ? `<span>${esc(p.outcome)}</span>` : ''}</div>
-    </div><div class="row-actions">
-      <button class="mini-icon ed" title="编辑成果">${ICON.edit}</button>
-      <button class="mini-icon un" title="恢复为进行中">${ICON.undo}</button>
-      <button class="mini-icon del" title="删除">${ICON.del}</button>
-    </div></div>`);
-    r.querySelector('.ed').onclick = () => openForm('成果信息', [
-      { k: 'title', label: '名称' },
-      { k: 'outcome', label: '成果说明', ph: '例：录用于《管理评论》/ 结项优秀', type: 'textarea', rows: 2 },
-      { k: 'archivedAt', label: '归档日期', type: 'date' }
-    ], p, d => { Object.assign(p, d); save(); renderAll(); });
-    r.querySelector('.un').onclick = () => { p.status = 'active'; save(); renderAll(); toast('已恢复为进行中'); };
-    r.querySelector('.del').onclick = () => confirmDel(`成果「${p.title}」`, () => { S.projects = S.projects.filter(x => x.id !== p.id); save(); renderAll(); });
-    al.appendChild(r);
-  });
-}
-
-let projFilter = 'all';
-
-function projCard(p) {
+function trackCard(item, kind) {
   const today = todayStr();
-  const d = p.deadline ? dayDiff(p.deadline, today) : null;
+  const d = item.deadline ? dayDiff(item.deadline, today) : null;
   const dtxt = d == null ? '未设截止' : d < 0 ? `逾期 ${-d} 天` : d === 0 ? '今天截止' : `剩 ${d} 天`;
+  const stageName = item.stages[item.stageIdx] || '进行中';
+  const dir = S.directions.find(x => x.id === item.directionId);
   const c = el(`<div class="proj">
     <div class="proj-head">
       <div style="flex:1;min-width:0">
-        <div class="proj-title">${esc(p.title)}</div>
+        <div class="proj-title">${esc(item.title)}</div>
         <div class="proj-tags">
-          <span class="chip-tag">${p.type === 'paper' ? '论文' : '项目'}</span>
-          <span class="stage">${esc(p.stage || '进行中')}</span>
+          ${kind === 'paper' ? '<span class="chip-tag">论文</span>' : `<span class="chip-tag">项目·${(PROJECT_KINDS[item.kind] || PROJECT_KINDS.academic).label}</span>`}
+          <span class="stage" style="background:var(--accent-soft);color:var(--accent)">${esc(stageName)}</span>
+          ${dir ? `<span class="chip-mini" style="border-color:var(--accent)">${esc(dir.name)}</span>` : ''}
+          ${item.targetJournal ? `<span class="chip-mini">${esc(item.targetJournal)}</span>` : ''}
         </div>
       </div>
     </div>
-    <div class="proj-bar"><i style="width:${clamp(Number(p.progress) || 0, 0, 100)}%"></i></div>
-    <div class="proj-info"><span>进度 ${clamp(Number(p.progress) || 0, 0, 100)}%</span>
-      <span style="${d != null && d <= 7 ? 'color:var(--clay)' : ''}">${esc(p.deadline || '')} ${dtxt}</span></div>
-    ${p.next ? `<div class="proj-next"><b>下一步</b>${esc(p.next)}</div>` : ''}
+    <div class="proj-bar"><i style="width:${clamp(Number(item.progress) || 0, 0, 100)}%"></i></div>
+    <div class="proj-info"><span>进度 ${clamp(Number(item.progress) || 0, 0, 100)}%</span>
+      <span style="${d != null && d <= 7 ? 'color:var(--clay)' : ''}">${esc(item.deadline || '')} ${dtxt}</span></div>
+    ${item.next ? `<div class="proj-next"><b>下一步</b>${esc(item.next)}</div>` : ''}
     <div class="proj-foot">
       <button class="soft-btn plus">推进 +10%</button>
+      <button class="soft-btn soft-btn--quiet nxt">下一阶段</button>
       <button class="soft-btn soft-btn--quiet ed">编辑</button>
       <button class="soft-btn soft-btn--quiet ar">归档</button>
       <button class="soft-btn soft-btn--quiet del">删除</button>
     </div>
   </div>`);
   c.querySelector('.plus').onclick = () => {
-    p.progress = clamp((Number(p.progress) || 0) + 10, 0, 100);
-    if (p.progress === 100) toast('已到 100%，可以归档啦');
+    item.progress = clamp((Number(item.progress) || 0) + 10, 0, 100);
+    if (item.progress === 100) toast('已到 100%，可以归档啦');
     save(); renderAll();
   };
-  c.querySelector('.ed').onclick = () => editProj(p);
-  c.querySelector('.ar').onclick = () => {
-    openForm('归档为成果', [
-      { k: 'outcome', label: '成果说明', type: 'textarea', rows: 2, ph: '例：论文录用 / 项目通过验收 / 结题报告已提交' },
-      { k: 'archivedAt', label: '归档日期', type: 'date', def: todayStr() }
-    ], { archivedAt: todayStr(), outcome: p.outcome || '' }, d => {
-      p.status = 'archived'; p.outcome = d.outcome; p.archivedAt = d.archivedAt || todayStr(); p.progress = 100;
-      save(); renderAll(); toast('已归档到成果记录中心');
-    });
+  c.querySelector('.nxt').onclick = () => {
+    item.stageIdx = Math.min(item.stageIdx + 1, item.stages.length - 1);
+    item.progress = Math.round(item.stageIdx / (item.stages.length - 1) * 100) || (Number(item.progress) || 0);
+    save(); renderAll();
   };
-  c.querySelector('.del').onclick = () => confirmDel(`「${p.title}」`, () => { S.projects = S.projects.filter(x => x.id !== p.id); save(); renderAll(); });
+  c.querySelector('.ed').onclick = () => editTrack(item, kind);
+  c.querySelector('.ar').onclick = () => archiveTrack(item, kind);
+  c.querySelector('.del').onclick = () => confirmDel(`「${item.title}」`, () => {
+    if (kind === 'paper') S.papers = S.papers.filter(x => x.id !== item.id);
+    else S.projects = S.projects.filter(x => x.id !== item.id);
+    save(); renderAll();
+  });
   return c;
 }
 
-function editProj(p) {
-  const isNew = !p;
-  const v = p || { title: '', type: 'paper', stage: STAGES[0], progress: 0, deadline: '', next: '' };
-  openForm(isNew ? '新建论文 / 项目' : '编辑', [
-    { k: 'title', label: '名称', ph: '例：数字化转型对制造企业全要素生产率的影响' },
-    { k: 'type', label: '类型', type: 'select', options: [{ v: 'paper', l: '论文' }, { v: 'project', l: '项目' }] },
-    { k: 'stage', label: '当前阶段', type: 'select', options: STAGES },
+function editTrack(item, kind) {
+  const isNew = !item;
+  const v = item || (kind === 'paper'
+    ? { title: '', targetJournal: '', stages: PAPER_STAGES.slice(), stageIdx: 0, progress: 0, deadline: '', next: '', directionId: '' }
+    : { title: '', kind: 'academic', stages: PROJECT_KINDS.academic.stages.slice(), stageIdx: 0, progress: 0, deadline: '', next: '', directionId: '' });
+  const stageOpts = (v.stages || []).map((s, i) => ({ v: String(i), l: s }));
+  const fields = kind === 'paper' ? [
+    { k: 'title', label: '论文题目', ph: '例：数字化转型对制造企业全要素生产率的影响' },
+    { k: 'targetJournal', label: '目标期刊（可选）', ph: '例：管理世界' },
+    { k: 'directionId', label: '关联方向', type: 'select', options: [{ v: '', l: '不关联' }].concat(S.directions.map(d => ({ v: d.id, l: d.name }))) },
+    { k: 'stageIdx', label: '当前阶段', type: 'select', options: stageOpts },
     { k: 'progress', label: '进度 %', type: 'number', min: 0, max: 100, step: 5 },
     { k: 'deadline', label: '截止日期', type: 'date' },
-    { k: 'next', label: '下一步动作', type: 'textarea', rows: 2, ph: '写得越具体，越容易开始' }
-  ], v, d => {
+    { k: 'next', label: '下一步动作', type: 'textarea', rows: 2, ph: '写得越具体，越容易开始' },
+    { k: 'stages', label: '阶段清单（逗号分隔，可自定义）', type: 'textarea', rows: 2, ph: PAPER_STAGES.join('、'), def: (v.stages || []).join('、') }
+  ] : [
+    { k: 'title', label: '项目名称', ph: '例：省科技厅软科学课题' },
+    { k: 'kind', label: '项目类型', type: 'select', options: Object.entries(PROJECT_KINDS).map(([k, o]) => ({ v: k, l: o.label })) },
+    { k: 'directionId', label: '关联方向', type: 'select', options: [{ v: '', l: '不关联' }].concat(S.directions.map(d => ({ v: d.id, l: d.name }))) },
+    { k: 'stageIdx', label: '当前阶段', type: 'select', options: stageOpts },
+    { k: 'progress', label: '进度 %', type: 'number', min: 0, max: 100, step: 5 },
+    { k: 'deadline', label: '截止日期', type: 'date' },
+    { k: 'next', label: '下一步动作', type: 'textarea', rows: 2, ph: '写得越具体，越容易开始' },
+    { k: 'stages', label: '阶段清单（逗号分隔，可自定义）', type: 'textarea', rows: 2, ph: '阶段一、阶段二…', def: (v.stages || []).join('、') }
+  ];
+  openForm(isNew ? (kind === 'paper' ? '新建论文' : '新建项目') : '编辑', fields, v, d => {
     if (!d.title) { toast('请填写名称'); return false; }
     d.progress = clamp(Number(d.progress) || 0, 0, 100);
-    if (isNew) S.projects.push({ id: uid(), status: 'active', ...d });
-    else Object.assign(p, d);
+    d.stageIdx = Number(d.stageIdx) || 0;
+    const stages = (d.stages || '').split(/[,，、]/).map(s => s.trim()).filter(Boolean);
+    if (stages.length) { d.stages = stages; if (d.stageIdx >= stages.length) d.stageIdx = stages.length - 1; }
+    else d.stages = v.stages || (kind === 'paper' ? PAPER_STAGES.slice() : PROJECT_KINDS.academic.stages.slice());
+    if (isNew) {
+      const base = { id: uid(), status: 'active', next: d.next || '', progress: d.progress, deadline: d.deadline || '', directionId: d.directionId || '', note: '' };
+      if (kind === 'paper') S.papers.push(Object.assign(base, { title: d.title, targetJournal: d.targetJournal || '', stages: d.stages, stageIdx: d.stageIdx }));
+      else S.projects.push(Object.assign(base, { title: d.title, kind: d.kind || 'academic', stages: d.stages, stageIdx: d.stageIdx }));
+    } else {
+      Object.assign(item, { title: d.title, stageIdx: d.stageIdx, stages: d.stages, progress: d.progress, deadline: d.deadline || '', next: d.next || '', directionId: d.directionId || '' });
+      if (kind === 'paper') item.targetJournal = d.targetJournal || ''; else item.kind = d.kind || item.kind;
+    }
     save(); renderAll();
   });
 }
 
+function archiveTrack(item, kind) {
+  openForm('归档为成果', [
+    { k: 'outcome', label: '成果说明', type: 'textarea', rows: 2, ph: '例：论文录用 / 项目通过验收 / 结题报告已提交' },
+    { k: 'date', label: '归档日期', type: 'date', def: todayStr() }
+  ], { date: todayStr(), outcome: item.outcome || '' }, d => {
+    item.status = 'archived'; item.outcome = d.outcome; item.archivedAt = d.date || todayStr(); item.progress = 100;
+    const atype = kind === 'paper' ? 'paper' : (item.kind === 'competition' ? 'competition' : 'project');
+    S.achievements.unshift({ id: uid(), title: item.title, type: atype, directionId: item.directionId || '', date: item.archivedAt, outcome: d.outcome, note: '' });
+    save(); renderAll(); toast('已归档到成果记录中心');
+  });
+}
+
+/* ---- 研究方向 ---- */
+function renderDirections() {
+  const box = $('#dirList'); $('#dirCount').textContent = S.directions.length + ' 个';
+  if (!S.directions.length) { box.innerHTML = '<div class="empty">还没有研究方向。定义 2–4 个方向，既能聚焦积累，也会加权顶刊推荐。</div>'; return; }
+  box.innerHTML = '';
+  S.directions.forEach(dir => {
+    const notes = S.researchNotes.filter(n => n.directionId === dir.id).length;
+    const tracks = [...S.papers, ...S.projects].filter(p => p.directionId === dir.id).length;
+    const c = el(`<div class="dir">
+      <div class="dir-head"><div style="flex:1;min-width:0">
+        <div class="dir-name">${esc(dir.name)}</div>
+        <div class="dir-meta"><span class="chip-mini">笔记 ${notes}</span><span class="chip-mini">追踪 ${tracks}</span></div>
+        ${dir.keywords ? `<div class="dir-kw">${dir.keywords.split(/[,，\s]+/).filter(Boolean).map(k => `<span class="chip-tag">${esc(k)}</span>`).join('')}</div>` : ''}
+        ${dir.note ? `<div class="dir-note">${esc(dir.note)}</div>` : ''}
+      </div><div class="row-actions">
+        <button class="mini-icon ed" title="编辑">${ICON.edit}</button>
+        <button class="mini-icon del" title="删除">${ICON.del}</button>
+      </div></div>
+    </div>`);
+    c.querySelector('.ed').onclick = () => editDirection(dir);
+    c.querySelector('.del').onclick = () => confirmDel(`方向「${dir.name}」`, () => {
+      S.directions = S.directions.filter(x => x.id !== dir.id);
+      S.papers.forEach(p => { if (p.directionId === dir.id) p.directionId = ''; });
+      S.projects.forEach(p => { if (p.directionId === dir.id) p.directionId = ''; });
+      S.researchNotes.forEach(n => { if (n.directionId === dir.id) n.directionId = ''; });
+      save(); renderResearch();
+    });
+    box.appendChild(c);
+  });
+}
+function editDirection(dir) {
+  const isNew = !dir;
+  openForm(isNew ? '新建研究方向' : '编辑方向', [
+    { k: 'name', label: '方向名称', ph: '例：数字化转型与企业生产率' },
+    { k: 'keywords', label: '关键词（逗号分隔，用于加权推荐）', ph: '例：digital transformation, productivity, AI', def: (dir && dir.keywords) || '' },
+    { k: 'note', label: '方向说明', type: 'textarea', rows: 2, ph: '这个方向我想解决什么问题', def: (dir && dir.note) || '' }
+  ], dir || {}, d => {
+    if (!d.name) { toast('请填写方向名称'); return false; }
+    if (isNew) S.directions.push({ id: uid(), name: d.name, keywords: d.keywords, note: d.note });
+    else Object.assign(dir, d);
+    save(); renderResearch(); toast(isNew ? '已添加' : '已更新');
+  });
+}
+
+/* ---- 成果档案 ---- */
 function exportAchievements() {
-  const arch = S.projects.filter(p => p.status === 'archived')
-    .sort((a, b) => (b.archivedAt || '').localeCompare(a.archivedAt || ''));
-  if (!arch.length) { toast('暂无归档成果'); return; }
+  if (!S.achievements.length) { toast('暂无归档成果'); return; }
+  const sorted = S.achievements.slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
   let md = `# 个人成果记录\n\n生成时间：${todayStr()}\n\n`;
-  ['paper', 'project'].forEach(tp => {
-    const g = arch.filter(p => p.type === tp);
+  ACH_TYPES.forEach(t => {
+    const g = sorted.filter(a => a.type === t.v);
     if (!g.length) return;
-    md += `## ${tp === 'paper' ? '论文成果' : '项目成果'}（${g.length}）\n\n`;
-    g.forEach((p, i) => {
-      md += `${i + 1}. **${p.title}**\n   - 归档日期：${p.archivedAt || '—'}\n   - 成果说明：${p.outcome || '—'}\n\n`;
+    md += `## ${t.l}（${g.length}）\n\n`;
+    g.forEach((a, i) => {
+      const dir = S.directions.find(d => d.id === a.directionId);
+      md += `${i + 1}. **${a.title}**\n   - 归档日期：${a.date || '—'}\n   - 成果说明：${a.outcome || '—'}\n   - 方向：${dir ? dir.name : '—'}\n\n`;
     });
   });
   download('个人成果记录_' + todayStr() + '.md', md, 'text/markdown');
   toast('成果清单已导出');
 }
 
+function renderResearch() {
+  renderPaperDaily();
+  /* 论文追踪 */
+  const pw = $('#paperTrackList'); pw.innerHTML = '';
+  const pf = S.papers.filter(p => paperTrackFilter === 'all' || p.status === paperTrackFilter);
+  if (!pf.length) pw.innerHTML = '<div class="empty">还没有追踪的论文，点「＋ 新建论文」</div>';
+  pf.sort((a, b) => (a.deadline || '9999').localeCompare(b.deadline || '9999') || a.stageIdx - b.stageIdx).forEach(p => pw.appendChild(trackCard(p, 'paper')));
+  /* 项目追踪 */
+  const pjw = $('#projTrackList'); pjw.innerHTML = '';
+  const pjf = S.projects.filter(p => projTrackFilter === 'all' || p.status === projTrackFilter);
+  if (!pjf.length) pjw.innerHTML = '<div class="empty">还没有追踪的项目，点「＋ 新建项目」</div>';
+  pjf.sort((a, b) => (a.deadline || '9999').localeCompare(b.deadline || '9999') || a.stageIdx - b.stageIdx).forEach(p => pjw.appendChild(trackCard(p, 'project')));
+  /* 方向 / 笔记 / 成果 */
+  renderDirections();
+  const nl = $('#noteList'); $('#noteCount').textContent = S.researchNotes.length + ' 条';
+  if (!S.researchNotes.length) nl.innerHTML = '<div class="empty">还没有笔记，读顶刊时点「记笔记」</div>';
+  S.researchNotes.slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).forEach(n => {
+    const dir = S.directions.find(d => d.id === n.directionId);
+    const row = el(`<div class="row"><div class="row-main">
+      <div class="row-title" style="font-weight:400">${esc(n.text)}</div>
+      <div class="row-meta">
+        ${n.paperTitle ? `<span class="chip-tag">${esc(n.paperTitle).slice(0, 30)}</span>` : ''}
+        ${dir ? `<span class="chip-mini">${esc(dir.name)}</span>` : ''}
+        <span>${esc((n.createdAt || '').slice(0, 16).replace('T', ' '))}</span>
+      </div>
+    </div><div class="row-actions"><button class="mini-icon del" title="删除">${ICON.del}</button></div></div>`);
+    nl.appendChild(row);
+    row.querySelector('.del').onclick = () => confirmDel('这条笔记', () => { S.researchNotes = S.researchNotes.filter(x => x.id !== n.id); save(); renderResearch(); });
+  });
+  /* 成果 */
+  const arch = S.achievements;
+  $('#archCount').textContent = arch.length + ' 项';
+  const byType = {};
+  ACH_TYPES.forEach(t => byType[t.v] = arch.filter(a => a.type === t.v).length);
+  $('#achStats').innerHTML = `<div class="ach-stat"><b>${arch.length}</b><span>累计成果</span></div>` +
+    ACH_TYPES.map(t => `<div class="ach-stat"><b class="accent-blue">${byType[t.v]}</b><span>${t.l}</span></div>`).join('');
+  const al = $('#archList');
+  al.innerHTML = arch.length ? '' : '<div class="empty">完成论文或项目后点「归档」，成果会沉淀在这里</div>';
+  arch.slice().sort((a, b) => (b.date || '').localeCompare(a.date || '')).forEach(a => {
+    const dir = S.directions.find(d => d.id === a.directionId);
+    const typeLabel = (ACH_TYPES.find(t => t.v === a.type) || { l: a.type }).l;
+    const r = el(`<div class="row"><div class="row-main">
+      <div class="row-title">${esc(a.title)}</div>
+      <div class="row-meta"><span class="chip-tag">${esc(typeLabel)}</span>
+        <span>归档于 ${esc(a.date || '—')}</span>${dir ? `<span class="chip-mini">${esc(dir.name)}</span>` : ''}${a.outcome ? `<span>${esc(a.outcome)}</span>` : ''}</div>
+    </div><div class="row-actions">
+      <button class="mini-icon ed" title="编辑">${ICON.edit}</button>
+      <button class="mini-icon del" title="删除">${ICON.del}</button>
+    </div></div>`);
+    r.querySelector('.ed').onclick = () => openForm('成果信息', [
+      { k: 'title', label: '名称' },
+      { k: 'type', label: '类型', type: 'select', options: ACH_TYPES },
+      { k: 'outcome', label: '成果说明', type: 'textarea', rows: 2 },
+      { k: 'date', label: '归档日期', type: 'date' }
+    ], a, d => { Object.assign(a, d); save(); renderAll(); });
+    r.querySelector('.del').onclick = () => confirmDel(`成果「${a.title}」`, () => { S.achievements = S.achievements.filter(x => x.id !== a.id); save(); renderAll(); });
+    al.appendChild(r);
+  });
+}
+
 /* ============================================================
    生活页
    ============================================================ */
-let lifeTab = 'ledger', ledgerType = 'out', ledgerFilterVal = 'all';
-
-function curMonth() { const v = $('#ledgerMonth').value; return v || todayStr().slice(0, 7); }
-
-function syncCatOptions() {
-  const sel = $('#qlCategory');
-  const list = ledgerType === 'out' ? CAT_OUT : CAT_IN;
-  sel.innerHTML = list.map(c => `<option>${c}</option>`).join('');
-}
+let lifeTab = 'sport';
 
 function renderLife() {
   $$('.life-panel').forEach(p => p.classList.toggle('is-active', p.id === 'life-' + lifeTab));
-  renderLedger(); renderSport(); renderMedia(); renderTravel();
-}
-
-/* ---- 记账 ---- */
-function renderLedger() {
-  const m = curMonth();
-  const rows = S.ledger.filter(r => r.date.slice(0, 7) === m);
-  const inc = rows.filter(r => r.type === 'in').reduce((s, r) => s + r.amount, 0);
-  const exp = rows.filter(r => r.type === 'out').reduce((s, r) => s + r.amount, 0);
-  $('#mIncome').textContent = money(inc);
-  $('#mExpense').textContent = money(exp);
-  const bal = inc - exp;
-  const bEl = $('#mBalance'); bEl.textContent = money(bal);
-  bEl.className = 'money-value ' + (bal >= 0 ? 'accent-green' : 'accent-clay');
-  $('#mRate').textContent = inc > 0 ? Math.round(bal / inc * 100) + '%' : '—';
-
-  breakdown($('#expenseBreak'), rows.filter(r => r.type === 'out'), 'var(--clay)');
-  breakdown($('#incomeBreak'), rows.filter(r => r.type === 'in'), 'var(--green)');
-  $('#expenseTotalChip').textContent = money(exp);
-  $('#incomeTotalChip').textContent = money(inc);
-
-  const list = $('#ledgerList');
-  const shown = rows.filter(r => ledgerFilterVal === 'all' || r.type === ledgerFilterVal)
-    .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
-  list.innerHTML = shown.length ? '' : '<div class="empty">本月还没有账目</div>';
-  shown.forEach(r => {
-    const row = el(`<div class="row"><div class="row-main">
-        <div class="row-title" style="font-weight:500">${esc(r.category)}${r.note ? ` <span style="color:var(--text-3);font-weight:400">· ${esc(r.note)}</span>` : ''}</div>
-        <div class="row-meta"><span>${esc(r.date)}</span></div>
-      </div>
-      <div class="amt ${r.type}">${r.type === 'out' ? '−' : '+'}${money(r.amount).slice(1)}</div>
-      <div class="row-actions"><button class="mini-icon ed">${ICON.edit}</button><button class="mini-icon del">${ICON.del}</button></div></div>`);
-    row.querySelector('.ed').onclick = () => editLedger(r);
-    row.querySelector('.del').onclick = () => confirmDel(`这笔 ${r.category} ${money(r.amount)}`, () => { S.ledger = S.ledger.filter(x => x.id !== r.id); save(); renderAll(); });
-    list.appendChild(row);
-  });
-}
-
-function breakdown(node, rows, color) {
-  const map = {};
-  rows.forEach(r => { map[r.category] = (map[r.category] || 0) + r.amount; });
-  const arr = Object.entries(map).sort((a, b) => b[1] - a[1]);
-  const total = arr.reduce((s, x) => s + x[1], 0);
-  node.innerHTML = arr.length ? '' : '<div class="empty">暂无数据</div>';
-  arr.forEach(([k, v]) => {
-    const pct = total ? Math.round(v / total * 100) : 0;
-    node.appendChild(el(`<div class="break-row">
-      <div class="break-top"><span>${esc(k)} <span style="color:var(--text-3)">${pct}%</span></span><span>${money(v)}</span></div>
-      <div class="break-bar"><i style="width:${pct}%;background:${color}"></i></div></div>`));
-  });
-}
-
-function editLedger(r) {
-  openForm('编辑账目', [
-    { k: 'type', label: '类型', type: 'select', options: [{ v: 'out', l: '支出' }, { v: 'in', l: '收入' }] },
-    { k: 'amount', label: '金额', type: 'number', step: '0.01', min: 0 },
-    { k: 'category', label: '分类', type: 'select', options: [...new Set([...CAT_OUT, ...CAT_IN])] },
-    { k: 'date', label: '日期', type: 'date' },
-    { k: 'note', label: '备注', type: 'text' }
-  ], r, d => {
-    const amt = Number(d.amount);
-    if (!(amt > 0)) { toast('金额需大于 0'); return false; }
-    Object.assign(r, { type: d.type, amount: amt, category: d.category, date: d.date || todayStr(), note: d.note });
-    save(); renderAll();
-  });
+  renderSport(); renderMedia(); renderTravel(); renderHabit();
 }
 
 /* ---- 运动 ---- */
@@ -810,7 +916,6 @@ function renderSport() {
   let streak = 0, d = new Date();
   while (dates.has(ymd(d))) { streak++; d.setDate(d.getDate() - 1); }
   $('#spStreak').textContent = streak;
-
   const list = $('#sportList');
   const all = S.sports.slice().sort((a, b) => b.date.localeCompare(a.date)).slice(0, 20);
   list.innerHTML = all.length ? '' : '<div class="empty">还没有运动记录</div>';
@@ -838,7 +943,7 @@ function editSport(r) {
   });
 }
 
-/* ---- 阅读观影 ---- */
+/* ---- 阅读观影（深度阅读） ---- */
 function renderMedia() {
   const bl = $('#bookList');
   bl.innerHTML = S.books.length ? '' : '<div class="empty">还没有书</div>';
@@ -846,13 +951,13 @@ function renderMedia() {
     const row = el(`<div class="row"><div class="row-main">
       <div class="row-title">${esc(b.title)}</div>
       <div class="row-meta"><span class="chip-tag">${esc(b.status)}</span>${b.author ? `<span>${esc(b.author)}</span>` : ''}<span>${b.progress || 0}%</span>${b.rating ? `<span>${'★'.repeat(Number(b.rating))}</span>` : ''}</div>
-      ${b.note ? `<div class="row-meta" style="color:var(--text-2);margin-top:4px">${esc(b.note)}</div>` : ''}
-    </div><div class="row-actions"><button class="mini-icon ed">${ICON.edit}</button><button class="mini-icon del">${ICON.del}</button></div></div>`);
+      ${b.note ? `<div class="row-meta" style="color:var(--text-2);margin-top:4px">📝 ${esc(b.note)}</div>` : ''}
+    </div><div class="row-actions"><button class="mini-icon note" title="深度阅读笔记">${ICON.star}</button><button class="mini-icon ed">${ICON.edit}</button><button class="mini-icon del">${ICON.del}</button></div></div>`);
     row.querySelector('.ed').onclick = () => editBook(b);
+    row.querySelector('.note').onclick = () => editBookNote(b);
     row.querySelector('.del').onclick = () => confirmDel(`《${b.title}》`, () => { S.books = S.books.filter(x => x.id !== b.id); save(); renderAll(); });
     bl.appendChild(row);
   });
-
   const ml = $('#movieList');
   ml.innerHTML = S.movies.length ? '' : '<div class="empty">还没有影片</div>';
   S.movies.forEach(mv => {
@@ -869,8 +974,7 @@ function renderMedia() {
 function editBook(b) {
   const isNew = !b;
   openForm(isNew ? '新增书籍' : '编辑书籍', [
-    { k: 'title', label: '书名' },
-    { k: 'author', label: '作者' },
+    { k: 'title', label: '书名' }, { k: 'author', label: '作者' },
     { k: 'status', label: '状态', type: 'select', options: ['在读', '想读', '已读', '弃读'] },
     { k: 'progress', label: '进度 %', type: 'number', min: 0, max: 100, step: 5 },
     { k: 'rating', label: '评分', type: 'select', options: ['', '1', '2', '3', '4', '5'] },
@@ -882,11 +986,29 @@ function editBook(b) {
     save(); renderAll();
   });
 }
+function editBookNote(b) {
+  openForm('深度阅读笔记 · ' + (b.title || ''), [
+    { k: 'core', label: '核心问题', type: 'textarea', rows: 2, ph: '这本书/文献想回答什么', def: (b.deep && b.deep.core) || '' },
+    { k: 'framework', label: '理论框架', type: 'textarea', rows: 2, ph: '用了什么理论视角', def: (b.deep && b.deep.framework) || '' },
+    { k: 'method', label: '研究方法 / 可取之处', type: 'textarea', rows: 2, ph: '方法能否迁移到我的研究', def: (b.deep && b.deep.method) || '' },
+    { k: 'critique', label: '批判性思考', type: 'textarea', rows: 2, ph: '局限、与我的方向如何结合', def: (b.deep && b.deep.critique) || '' },
+    { k: 'directionId', label: '关联方向', type: 'select', options: [{ v: '', l: '不关联' }].concat(S.directions.map(d => ({ v: d.id, l: d.name }))) }
+  ], b.deep || {}, d => {
+    b.deep = { core: d.core, framework: d.framework, method: d.method, critique: d.critique };
+    b.directionId = d.directionId || '';
+    if (b.directionId) {
+      const dir = S.directions.find(x => x.id === b.directionId);
+      const txt = `《${b.title}》阅读笔记：核心问题——${d.core || '—'}；可取之处——${d.method || '—'}；批判——${d.critique || '—'}`;
+      S.researchNotes.unshift({ id: uid(), text: txt, paperTitle: b.title, directionId: b.directionId, createdAt: new Date().toISOString() });
+      toast('已存入研读笔记' + (dir ? `（${dir.name}）` : ''));
+    } else toast('阅读笔记已保存');
+    save(); renderAll();
+  });
+}
 function editMovie(mv) {
   const isNew = !mv;
   openForm(isNew ? '新增影片' : '编辑影片', [
-    { k: 'title', label: '片名' },
-    { k: 'date', label: '观看日期', type: 'date', def: todayStr() },
+    { k: 'title', label: '片名' }, { k: 'date', label: '观看日期', type: 'date', def: todayStr() },
     { k: 'rating', label: '评分', type: 'select', options: ['', '1', '2', '3', '4', '5'] },
     { k: 'note', label: '一句话感想', type: 'textarea', rows: 2 }
   ], mv || { date: todayStr() }, d => {
@@ -947,6 +1069,47 @@ function editTrip(t) {
   });
 }
 
+/* ---- 习惯打卡 ---- */
+function habitStreak(h) {
+  let streak = 0; const d = new Date();
+  while (h.records[ymd(d)]) { streak++; d.setDate(d.getDate() - 1); }
+  return streak;
+}
+function renderHabit() {
+  const w = $('#habitList');
+  if (!S.habits.length) { w.innerHTML = '<div class="empty">添加一个习惯，每天点一下打卡，连续天数会累计。</div>'; return; }
+  w.innerHTML = '';
+  const today = todayStr();
+  S.habits.forEach(h => {
+    const done = !!h.records[today];
+    const streak = habitStreak(h);
+    // 最近 21 天热力图
+    let dots = '';
+    for (let i = 20; i >= 0; i--) { const d = ymd(new Date(Date.now() - i * 86400000)); dots += `<i class="hb-dot ${h.records[d] ? 'on' : ''}"></i>`; }
+    const c = el(`<div class="habit">
+      <div class="habit-top">
+        <div style="flex:1;min-width:0"><div class="habit-name">${esc(h.name)}</div>
+          <div class="habit-meta"><span class="chip-mini">连续 ${streak} 天</span></div></div>
+        <button class="hb-toggle ${done ? 'on' : ''}">${done ? '已打卡 ✓' : '今日打卡'}</button>
+        <div class="row-actions"><button class="mini-icon ed">${ICON.edit}</button><button class="mini-icon del">${ICON.del}</button></div>
+      </div>
+      <div class="hb-heat">${dots}</div>
+    </div>`);
+    c.querySelector('.hb-toggle').onclick = () => {
+      if (h.records[today]) delete h.records[today]; else h.records[today] = true;
+      save(); renderAll();
+    };
+    c.querySelector('.ed').onclick = () => openForm('编辑习惯', [{ k: 'name', label: '习惯名称', ph: '例：每天阅读 30 分钟' }], h, d => {
+      if (!d.name) { toast('请填写名称'); return false; } h.name = d.name; save(); renderAll();
+    });
+    c.querySelector('.del').onclick = () => confirmDel(`习惯「${h.name}」`, () => { S.habits = S.habits.filter(x => x.id !== h.id); save(); renderAll(); });
+    w.appendChild(c);
+  });
+}
+function addHabit() { openForm('新增习惯', [{ k: 'name', label: '习惯名称', ph: '例：每天阅读 30 分钟 / 运动 / 冥想' }], {}, d => {
+  if (!d.name) { toast('请填写名称'); return false; } S.habits.push({ id: uid(), name: d.name, records: {} }); save(); renderAll();
+}); }
+
 /* ============================================================
    回顾页
    ============================================================ */
@@ -967,7 +1130,6 @@ function renderReview() {
   const [s, e] = rangeBounds();
   const inR = d => d && d >= s && d <= e;
 
-  /* 任务柱状 */
   const buckets = [];
   if (reviewRange === 'week') {
     const st = parseDate(s);
@@ -1001,16 +1163,17 @@ function renderReview() {
   $('#rvTaskChip').textContent = `${tDone}/${tAll} · ${tAll ? Math.round(tDone / tAll * 100) : 0}%`;
 
   /* 科研 */
-  const arch = S.projects.filter(p => p.status === 'archived' && inR(p.archivedAt));
-  const activeP = S.projects.filter(p => p.status !== 'archived');
+  const arch = S.achievements.filter(a => inR(a.date));
+  const activeP = [...S.papers, ...S.projects].filter(p => p.status !== 'archived');
   const avgProg = activeP.length ? Math.round(activeP.reduce((a, p) => a + (Number(p.progress) || 0), 0) / activeP.length) : 0;
-  const libNew = S.library.filter(x => inR(x.addedAt)).length;
+  const notesN = S.researchNotes.filter(n => inR((n.createdAt || '').slice(0, 10))).length;
   $('#rvResearch').innerHTML = [
-    ['进行中论文 / 项目', activeP.length + ' 项'],
+    ['进行中论文', S.papers.filter(p => p.status !== 'archived').length + ' 篇'],
+    ['进行中项目', S.projects.filter(p => p.status !== 'archived').length + ' 个'],
     ['平均进度', avgProg + '%'],
     ['本期归档成果', arch.length + ' 项'],
-    ['本期新增文献', libNew + ' 篇'],
-    ['文献库总量', S.library.length + ' 篇']
+    ['本期新增笔记', notesN + ' 条'],
+    ['研究方向', S.directions.length + ' 个']
   ].map(([k, v]) => `<div class="kv"><span>${k}</span><span>${v}</span></div>`).join('');
 
   /* 生活 */
@@ -1026,27 +1189,28 @@ function renderReview() {
     ['旅行计划', S.trips.length + ' 个']
   ].map(([k, v]) => `<div class="kv"><span>${k}</span><span>${v}</span></div>`).join('');
 
-  /* 财务 */
-  const rows = S.ledger.filter(x => inR(x.date));
-  const inc = rows.filter(r => r.type === 'in').reduce((a, r) => a + r.amount, 0);
-  const exp = rows.filter(r => r.type === 'out').reduce((a, r) => a + r.amount, 0);
-  const days = Math.max(1, dayDiff(e > todayStr() ? todayStr() : e, s) + 1);
-  $('#rvMoney').innerHTML = [
-    ['收入', money(inc)], ['支出', money(exp)], ['结余', money(inc - exp)],
-    ['日均支出', money(exp / days)], ['笔数', rows.length + ' 笔']
+  /* 阅读与思考 */
+  const deepBooks = S.books.filter(b => b.deep && (Object.values(b.deep).some(v => v)));
+  $('#rvReading').innerHTML = [
+    ['深度阅读笔记', deepBooks.length + ' 本'],
+    ['研读笔记总数', S.researchNotes.length + ' 条'],
+    ['本期新增笔记', notesN + ' 条'],
+    ['累计读完', readDone + ' 本']
   ].map(([k, v]) => `<div class="kv"><span>${k}</span><span>${v}</span></div>`).join('');
-  $('#rvMoneyChip').textContent = `${s.slice(5)} ~ ${e.slice(5)}`;
-  breakdown($('#rvMoneyBreak'), rows.filter(r => r.type === 'out'), 'var(--clay)');
+
+  /* 习惯 */
+  const hb = S.habits.map(h => ({ name: h.name, streak: habitStreak(h) }));
+  $('#rvHabit').innerHTML = hb.length
+    ? hb.map(h => `<div class="kv"><span>${esc(h.name)}</span><span>连续 ${h.streak} 天</span></div>`).join('')
+    : '<div class="empty">还没有习惯</div>';
 
   /* 文字小结 */
   const rangeName = { week: '本周', month: '本月', year: '今年' }[reviewRange];
   const rate = tAll ? Math.round(tDone / tAll * 100) : 0;
   let txt = `${rangeName}共安排 ${tAll} 项任务，完成 ${tDone} 项，完成率 ${rate}%。`;
   txt += rate >= 80 ? '节奏保持得很好。' : rate >= 50 ? '整体推进正常，可以再收紧一点计划密度。' : tAll ? '完成率偏低，建议把大任务拆成更小的下一步动作。' : '还没有记录任务，先从今天写下三件事开始。';
-  txt += ` 科研方面有 ${activeP.length} 项在推进，平均进度 ${avgProg}%${arch.length ? `，${rangeName}归档了 ${arch.length} 项成果` : ''}。`;
-  txt += ` 生活上运动 ${sp.length} 次、观影 ${mv.length} 部；收支方面收入 ${money(inc)}、支出 ${money(exp)}，结余 ${money(inc - exp)}。`;
-  const topCat = Object.entries(rows.filter(r => r.type === 'out').reduce((m, r) => (m[r.category] = (m[r.category] || 0) + r.amount, m), {})).sort((a, b) => b[1] - a[1])[0];
-  if (topCat) txt += ` 支出占比最高的是「${topCat[0]}」，${money(topCat[1])}。`;
+  txt += ` 科研方面有 ${activeP.length} 项在推进，平均进度 ${avgProg}%${arch.length ? `，${rangeName}归档了 ${arch.length} 项成果` : ''}；研读笔记新增 ${notesN} 条。`;
+  txt += ` 生活上运动 ${sp.length} 次、观影 ${mv.length} 部，累计读完 ${readDone} 本；习惯打卡${hb.length ? '：' + hb.map(h => `${h.name}${h.streak}天`).join('、') : '尚未开始'}。`;
   $('#reviewSummary').textContent = txt;
 }
 
@@ -1062,8 +1226,9 @@ function download(name, content, type) {
 }
 
 function openSettings() {
-  const count = S.tasks.length + S.inbox.length + S.library.length + S.projects.length +
-    S.sports.length + S.books.length + S.movies.length + S.trips.length + S.ledger.length;
+  const count = S.tasks.length + S.inbox.length + S.calendar.length + S.papers.length + S.projects.length +
+    S.directions.length + S.researchNotes.length + S.achievements.length + S.sports.length +
+    S.books.length + S.movies.length + S.trips.length + S.habits.length;
   const body = el(`<div>
     <div class="help-block" style="margin-bottom:14px">
       数据默认保存在本机浏览器（localStorage）。开启<b>云端同步</b>后，数据自动存到 JSONBin 云端，手机与电脑共享同一份，且代码更新不影响数据。当前共 <b>${count}</b> 条记录。
@@ -1107,7 +1272,7 @@ function openSettings() {
     const r = $('#syncTestResult');
     if (!Sync.enabled()) { r.textContent = '请先填写 Bin ID 与 API Key'; r.style.color = 'var(--danger)'; return; }
     r.textContent = '测试中…'; r.style.color = '';
-    try { const c = await Sync.pull(); r.textContent = '连接成功 ✓'; r.style.color = 'var(--ok)'; }
+    try { await Sync.pull(); r.textContent = '连接成功 ✓'; r.style.color = 'var(--ok)'; }
     catch (e) { r.textContent = e.message; r.style.color = 'var(--danger)'; }
   };
   body.querySelector('#btnCreateBin').onclick = async () => {
@@ -1123,10 +1288,7 @@ function openSettings() {
     } catch (e) { r.textContent = e.message; r.style.color = 'var(--danger)'; }
   };
   body.querySelector('#setNick').onchange = e => { S.settings.nick = e.target.value.trim(); save(); renderGreeting(); };
-  body.querySelector('#btnExport').onclick = () => {
-    download(`研习台备份_${todayStr()}.json`, JSON.stringify(S, null, 2));
-    toast('已导出备份文件');
-  };
+  body.querySelector('#btnExport').onclick = () => { download(`研习台备份_${todayStr()}.json`, JSON.stringify(S, null, 2)); toast('已导出备份文件'); };
   body.querySelector('#fileImport').onchange = e => {
     const f = e.target.files[0]; if (!f) return;
     const fr = new FileReader();
@@ -1155,22 +1317,33 @@ function seedDemo() {
     { id: uid(), title: '导师组会汇报提纲', date: d(1), done: false, tag: '会议', note: '' },
     { id: uid(), title: '健身房 45 分钟', date: t, done: false, tag: '生活', note: '' }
   );
-  S.projects.push(
-    { id: uid(), title: '数字化转型对制造企业全要素生产率的影响', type: 'paper', stage: '模型/实证', progress: 55, deadline: d(28), next: '补充中介效应检验并重跑稳健性', status: 'active' },
-    { id: uid(), title: '省科技厅软科学课题：区域创新效率评价', type: 'project', stage: '数据收集', progress: 30, deadline: d(60), next: '整理 2015—2024 年省级面板数据', status: 'active' },
-    { id: uid(), title: '本科毕业论文：智能制造与就业结构', type: 'paper', stage: '结项验收', progress: 100, status: 'archived', archivedAt: d(-120), outcome: '校级优秀毕业论文' }
+  S.directions.push(
+    { id: uid(), name: '数字化转型与企业生产率', keywords: 'digital transformation, productivity, 全要素生产率', note: '关注 AI / 自动化对制造企业效率的因果识别' },
+    { id: uid(), name: 'AI 与组织创新', keywords: 'AI, innovation, 组织', note: '人工智能采纳对研发与组织惯例的影响' }
   );
-  S.ledger.push(
-    { id: uid(), type: 'in', amount: 3000, category: '助研津贴', date: t.slice(0, 8) + '05', note: '导师课题' },
-    { id: uid(), type: 'in', amount: 800, category: '奖学金', date: t.slice(0, 8) + '10', note: '学业奖学金' },
-    { id: uid(), type: 'out', amount: 980, category: '餐饮', date: t.slice(0, 8) + '12', note: '食堂+外卖' },
-    { id: uid(), type: 'out', amount: 260, category: '学习科研', date: t.slice(0, 8) + '14', note: '文献下载与打印' },
-    { id: uid(), type: 'out', amount: 420, category: '交通', date: t.slice(0, 8) + '18', note: '回家高铁' }
+  const did = S.directions[0].id;
+  S.papers.push(
+    { id: uid(), title: '数字化转型对制造企业全要素生产率的影响', targetJournal: '管理世界', stages: PAPER_STAGES.slice(), stageIdx: 4, progress: 55, deadline: d(28), next: '补充中介效应检验并重跑稳健性', status: 'active', directionId: did, archivedAt: '', outcome: '' },
+    { id: uid(), title: '工业机器人渗透度与企业创新产出', targetJournal: '经济研究', stages: PAPER_STAGES.slice(), stageIdx: 2, progress: 30, deadline: d(60), next: '构建城市-行业层面机器人存量', status: 'active', directionId: S.directions[1].id, archivedAt: '', outcome: '' }
+  );
+  S.projects.push(
+    { id: uid(), title: '省科技厅软科学课题：区域创新效率评价', kind: 'academic', stages: PROJECT_KINDS.academic.stages.slice(), stageIdx: 1, progress: 30, deadline: d(60), next: '整理 2015—2024 年省级面板数据', status: 'active', directionId: did, archivedAt: '', outcome: '' }
+  );
+  S.achievements.push(
+    { id: uid(), title: '本科毕业论文：智能制造与就业结构', type: 'paper', directionId: did, date: d(-120), outcome: '校级优秀毕业论文', note: '' }
+  );
+  S.calendar.push(
+    { id: uid(), title: '开题答辩', date: d(10), end: '', type: '科研', note: '准备 15 分钟 PPT' },
+    { id: uid(), title: '导师组会', date: d(2), end: '', type: '科研', note: '' }
+  );
+  S.researchNotes.push(
+    { id: uid(), title: '', text: 'Bartik 工具变量思路：用行业层面机器人渗透度 × 地区行业就业份额做 IV，识别自动化对生产率的因果效应。', paperTitle: '', directionId: did, createdAt: new Date().toISOString() }
   );
   S.sports.push({ id: uid(), type: '跑步', minutes: 40, date: t, note: '5 公里' });
   S.books.push({ id: uid(), title: '技术与经济增长', author: '—', status: '在读', progress: 40, rating: '4', note: '第 3 章与选题相关' });
   S.movies.push({ id: uid(), title: '奥本海默', date: d(-6), rating: '5', note: '' });
   S.trips.push({ id: uid(), title: '成都 · 学术会议 + 短途', start: d(35), end: d(38), budget: 2600, note: '会议报销部分交通', items: [{ text: '提交参会回执', ok: true }, { text: '订往返机票', ok: false }] });
+  S.habits.push({ id: uid(), name: '每天阅读 30 分钟', records: { [d(0)]: true, [d(-1)]: true, [d(-2)]: true } });
   S.inbox.push({ id: uid(), text: '能不能用工业机器人渗透度做 Bartik 工具变量？', tag: '选题', createdAt: new Date().toISOString() });
   save(); renderAll(); toast('示例数据已载入');
 }
@@ -1179,24 +1352,15 @@ function seedDemo() {
    快速记录
    ============================================================ */
 let quickTag = '灵感';
-function openQuick() {
-  $('#quickMask').classList.add('show');
-  setTimeout(() => $('#quickText').focus(), 150);
-}
+function openQuick() { $('#quickMask').classList.add('show'); setTimeout(() => $('#quickText').focus(), 150); }
 function closeQuick() { $('#quickMask').classList.remove('show'); }
 function saveQuick(asTask) {
   const txt = $('#quickText').value.trim();
   if (!txt) { toast('先写点什么吧'); return; }
-  if (asTask) {
-    S.tasks.push({ id: uid(), title: txt.slice(0, 80), date: todayStr(), done: false, tag: quickTag === '待办' ? '' : quickTag, note: '' });
-    toast('已加入今日任务');
-  } else {
-    S.inbox.unshift({ id: uid(), text: txt, tag: quickTag, createdAt: new Date().toISOString() });
-    toast('已存入收集箱');
-  }
+  if (asTask) { S.tasks.push({ id: uid(), title: txt.slice(0, 80), date: todayStr(), done: false, tag: quickTag === '待办' ? '' : quickTag, note: '' }); toast('已加入今日任务'); }
+  else { S.inbox.unshift({ id: uid(), text: txt, tag: quickTag, createdAt: new Date().toISOString() }); toast('已存入收集箱'); }
   $('#quickText').value = ''; save(); renderAll(); closeQuick();
 }
-
 function openInboxAll() {
   const body = el('<div class="list list--tight"></div>');
   if (!S.inbox.length) body.innerHTML = '<div class="empty">收集箱为空</div>';
@@ -1236,89 +1400,47 @@ function bind() {
 
   /* 首页 */
   $('#addTaskBtn').onclick = () => editTask(null);
-  $('#taskFilter').onclick = e => {
-    const b = e.target.closest('button'); if (!b) return;
-    taskFilter = b.dataset.tf;
-    $$('#taskFilter button').forEach(x => x.classList.toggle('is-active', x === b));
-    renderHome();
-  };
+  $('#taskFilter').onclick = e => { const b = e.target.closest('button'); if (!b) return; taskFilter = b.dataset.tf; $$('#taskFilter button').forEach(x => x.classList.toggle('is-active', x === b)); renderHome(); };
+  $('#calPrev').onclick = () => { calMonth--; if (calMonth < 0) { calMonth = 11; calYear--; } renderCalendar(); };
+  $('#calNext').onclick = () => { calMonth++; if (calMonth > 11) { calMonth = 0; calYear++; } renderCalendar(); };
+  $('#calToday').onclick = () => { calYear = new Date().getFullYear(); calMonth = new Date().getMonth(); calSelDate = todayStr(); renderCalendar(); };
   $('#icsInput').onchange = e => { const f = e.target.files[0]; if (f) importICS(f); e.target.value = ''; };
-  $('#icsClear').onclick = () => confirmDel('全部由日历导入的事件', () => { S.tasks = S.tasks.filter(t => t.source !== 'ics'); save(); renderAll(); });
-  $('#calHelpBtn').onclick = calHelp;
   $('#inboxMoreBtn').onclick = openInboxAll;
+  $('#inspireSave').onclick = saveInspire;
+  $('#inspireInput').onkeydown = e => { if (e.key === 'Enter') saveInspire(); };
 
   /* 科研 */
   $('#paperShuffle').onclick = () => { S.settings.paperShift = (S.settings.paperShift || 0) + 1; save(); renderPaperDaily(); };
   $('#paperRefresh').onclick = () => loadFeed(true);
-  $('#paperMode').onclick = e => {
-    const b = e.target.closest('button'); if (!b) return;
-    S.settings.feedMode = b.dataset.pm; save(); renderPaperDaily();
-  };
-  $('#addPaperBtn').onclick = () => openForm('手动添加文献', [
-    { k: 't', label: '标题' }, { k: 'a', label: '作者' }, { k: 'j', label: '期刊' },
-    { k: 'y', label: '年份', type: 'number' }, { k: 'note', label: '笔记', type: 'textarea', rows: 3 }
-  ], { y: new Date().getFullYear() }, d => {
-    if (!d.t) { toast('请填写标题'); return false; }
-    S.library.unshift({ id: uid(), en: '', addedAt: todayStr(), ...d }); save(); renderAll();
-  });
-  $('#addProjBtn').onclick = () => editProj(null);
-  $('#projFilter').onclick = e => {
-    const b = e.target.closest('button'); if (!b) return;
-    projFilter = b.dataset.pf;
-    $$('#projFilter button').forEach(x => x.classList.toggle('is-active', x === b));
-    renderResearch();
-  };
+  $('#paperMode').onclick = e => { const b = e.target.closest('button'); if (!b) return; S.settings.feedMode = b.dataset.pm; save(); renderPaperDaily(); };
+  $('#addPaperBtn').onclick = () => editTrack(null, 'paper');
+  $('#addProjBtn').onclick = () => editTrack(null, 'project');
+  $('#paperTrackFilter').onclick = e => { const b = e.target.closest('button'); if (!b) return; paperTrackFilter = b.dataset.ptf; $$('#paperTrackFilter button').forEach(x => x.classList.toggle('is-active', x === b)); renderResearch(); };
+  $('#projTrackFilter').onclick = e => { const b = e.target.closest('button'); if (!b) return; projTrackFilter = b.dataset.prf; $$('#projTrackFilter button').forEach(x => x.classList.toggle('is-active', x === b)); renderResearch(); };
+  $('#addDirBtn').onclick = () => editDirection(null);
+  $('#addNoteBtn').onclick = () => openNoteEditor({});
+  $('#addAchBtn').onclick = () => openForm('手动添加成果', [
+    { k: 'title', label: '名称' }, { k: 'type', label: '类型', type: 'select', options: ACH_TYPES },
+    { k: 'outcome', label: '成果说明', type: 'textarea', rows: 2 }, { k: 'date', label: '归档日期', type: 'date', def: todayStr() }
+  ], { date: todayStr() }, d => { if (!d.title) { toast('请填写名称'); return false; } S.achievements.unshift({ id: uid(), title: d.title, type: d.type, directionId: '', date: d.date || todayStr(), outcome: d.outcome, note: '' }); save(); renderAll(); toast('已添加'); });
   $('#archExport').onclick = exportAchievements;
 
   /* 生活 */
-  $('#lifeTabs').onclick = e => {
-    const b = e.target.closest('button'); if (!b) return;
-    lifeTab = b.dataset.life;
-    $$('#lifeTabs button').forEach(x => x.classList.toggle('is-active', x === b));
-    renderLife();
-  };
-  $('#ledgerType').onclick = e => {
-    const b = e.target.closest('button'); if (!b) return;
-    ledgerType = b.dataset.lt;
-    $$('#ledgerType button').forEach(x => x.classList.toggle('is-active', x === b));
-    syncCatOptions();
-  };
-  $('#quickLedger').onsubmit = e => {
-    e.preventDefault();
-    const amt = Number($('#qlAmount').value);
-    if (!(amt > 0)) { toast('请输入金额'); return; }
-    S.ledger.push({
-      id: uid(), type: ledgerType, amount: Math.round(amt * 100) / 100,
-      category: $('#qlCategory').value, date: $('#qlDate').value || todayStr(),
-      note: $('#qlNote').value.trim()
-    });
-    $('#qlAmount').value = ''; $('#qlNote').value = '';
-    save(); renderLedger(); toast('已记录');
-  };
-  $('#ledgerMonth').onchange = renderLedger;
-  $('#ledgerFilter').onchange = e => { ledgerFilterVal = e.target.value; renderLedger(); };
+  $('#lifeTabs').onclick = e => { const b = e.target.closest('button'); if (!b) return; lifeTab = b.dataset.life; $$('#lifeTabs button').forEach(x => x.classList.toggle('is-active', x === b)); renderLife(); };
   $('#addSportBtn').onclick = () => editSport(null);
   $('#addBookBtn').onclick = () => editBook(null);
   $('#addMovieBtn').onclick = () => editMovie(null);
   $('#addTripBtn').onclick = () => editTrip(null);
+  $('#addHabitBtn').onclick = addHabit;
 
   /* 回顾 */
-  $('#reviewRange').onclick = e => {
-    const b = e.target.closest('button'); if (!b) return;
-    reviewRange = b.dataset.rr;
-    $$('#reviewRange button').forEach(x => x.classList.toggle('is-active', x === b));
-    renderReview();
-  };
+  $('#reviewRange').onclick = e => { const b = e.target.closest('button'); if (!b) return; reviewRange = b.dataset.rr; $$('#reviewRange button').forEach(x => x.classList.toggle('is-active', x === b)); renderReview(); };
 
   /* 快速记录 */
   $('#fab').onclick = openQuick;
   $('#quickClose').onclick = closeQuick;
   $('#quickMask').onclick = e => { if (e.target.id === 'quickMask') closeQuick(); };
-  $('#quickTags').onclick = e => {
-    const b = e.target.closest('button'); if (!b) return;
-    quickTag = b.dataset.qt;
-    $$('#quickTags button').forEach(x => x.classList.toggle('is-active', x === b));
-  };
+  $('#quickTags').onclick = e => { const b = e.target.closest('button'); if (!b) return; quickTag = b.dataset.qt; $$('#quickTags button').forEach(x => x.classList.toggle('is-active', x === b)); };
   $('#quickSave').onclick = () => saveQuick(false);
   $('#quickToTask').onclick = () => saveQuick(true);
   $('#quickText').onkeydown = e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') saveQuick(false); };
@@ -1332,10 +1454,6 @@ function bind() {
 /* ---------------- 启动 ---------------- */
 function init() {
   applyTheme();
-  $('#ledgerMonth').value = todayStr().slice(0, 7);
-  $('#qlDate').value = todayStr();
-  syncCatOptions();
-  // 云端同步初始化
   if (window.Sync) {
     Sync.setCreds(S.settings.binId, S.settings.apiKey);
     Sync.onStatus(updateSyncBadge);
@@ -1347,7 +1465,6 @@ function init() {
 }
 init();
 
-// 版本检查：代码更新后手机自动刷新拿到新版
 function checkUpdate() {
   fetch('version.txt', { cache: 'no-store' })
     .then(r => r.ok ? r.text() : null)
@@ -1355,12 +1472,8 @@ function checkUpdate() {
       const v = (t || '').trim();
       if (!v) return;
       const seen = localStorage.getItem('yanxitai.seenVersion');
-      if (seen && seen !== v) {
-        toast('发现新版本，正在刷新…');
-        setTimeout(() => location.reload(true), 900);
-      } else {
-        localStorage.setItem('yanxitai.seenVersion', v);
-      }
+      if (seen && seen !== v) { toast('发现新版本，正在刷新…'); setTimeout(() => location.reload(true), 900); }
+      else localStorage.setItem('yanxitai.seenVersion', v);
     })
     .catch(() => {});
 }
