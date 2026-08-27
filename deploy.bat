@@ -10,8 +10,9 @@ cd /d %~dp0
 REM 提交说明（默认带时间戳）
 set "MSG=update: %date% %time%"
 
-REM 更新版本号，触发手机端自动刷新拿到新版
-echo %date% %time% > version.txt
+REM 更新版本号（格式 YYYY-MM-DD.HHMMSS），触发手机端自动刷新拿到新版
+for /f "tokens=*" %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyy-MM-dd.HHmmss"') do set "VER=%%i"
+echo %VER%> version.txt
 
 where gh >nul 2>nul
 if not errorlevel 1 (
