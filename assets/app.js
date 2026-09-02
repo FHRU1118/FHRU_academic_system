@@ -154,9 +154,15 @@ function save() {
 }
 
 function adoptCloud(cloud) {
+  /* 保留本地已填写的凭据：云端拉取绝不允许冲掉 Bin/APIKey */
+  const keepBin = S.settings.binId, keepKey = S.settings.apiKey;
+  const cloudBin = (cloud.settings && cloud.settings.binId) || '';
+  const cloudKey = (cloud.settings && cloud.settings.apiKey) || '';
   S = normalize(Object.assign(structuredClone(DEFAULT_STATE), cloud, {
     settings: Object.assign({}, DEFAULT_STATE.settings, cloud.settings || {})
   }));
+  S.settings.binId = keepBin || cloudBin;
+  S.settings.apiKey = keepKey || cloudKey;
   try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {}
   renderAll();
 }
@@ -1263,6 +1269,8 @@ function openSettings() {
     S.settings.binId = $('#setBinId').value.trim();
     S.settings.apiKey = $('#setApiKey').value.trim();
     if (window.Sync) Sync.setCreds(S.settings.binId, S.settings.apiKey);
+    /* 立即同步落盘，确保凭据与数据本地不丢 */
+    try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {}
     save();
     if (Sync.enabled()) Sync.startup(S, adoptCloud);
   };
@@ -1272,7 +1280,12 @@ function openSettings() {
     const r = $('#syncTestResult');
     if (!Sync.enabled()) { r.textContent = '请先填写 Bin ID 与 API Key'; r.style.color = 'var(--danger)'; return; }
     r.textContent = '测试中…'; r.style.color = '';
-    try { await Sync.pull(); r.textContent = '连接成功 ✓'; r.style.color = 'var(--ok)'; }
+    try {
+      const cloud = await Sync.pull();
+      if (cloud && cloud.savedAt) { adoptCloud(cloud); r.textContent = '连接成功 ✓ 已同步云端数据'; }
+      else r.textContent = '连接成功 ✓ 云端暂无数据';
+      r.style.color = 'var(--ok)';
+    }
     catch (e) { r.textContent = e.message; r.style.color = 'var(--danger)'; }
   };
   body.querySelector('#btnCreateBin').onclick = async () => {

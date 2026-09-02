@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>用 AI 重塑开放性知识工作 · 研习台汇报</title>
+<style>
+  :root{
+    --paper:#F6F2EA; --paper-2:#EFE9DD; --surface:#FFFFFF;
+    --ink:#2B2823; --ink-2:#5C554B; --ink-3:#8C8475;
+    --line:#E2D9C8; --line-soft:#ECE4D6;
+    --clay:#C2683B; --clay-d:#A4502B; --green:#3A6B5E; --green-d:#2C5247;
+    --blue:#3E6CA8;
+    --shadow:0 10px 30px -12px rgba(60,50,35,.28);
+    --radius:18px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{height:100%;}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
+    background:#1c1a17; color:var(--ink); -webkit-font-smoothing:antialiased;
+    overflow:hidden;
+  }
+  .deck{position:relative;width:100vw;height:100vh;}
+  .slide{
+    position:absolute;inset:0;display:none;align-items:center;justify-content:center;
+    padding:4.2vh 6vw;background:var(--paper);
+    background-image:radial-gradient(circle at 12% 18%,rgba(194,104,59,.06),transparent 40%),
+                     radial-gradient(circle at 88% 82%,rgba(58,107,94,.06),transparent 42%);
+  }
+  .slide.active{display:flex;animation:fade .45s ease;}
+  @keyframes fade{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:none;}}
+  .stage{width:100%;max-width:1120px;max-height:92vh;overflow:auto;}
+  .stage::-webkit-scrollbar{width:0;}
+
+  /* ---------- 通用排版 ---------- */
+  h1{font-size:clamp(28px,4.4vw,52px);line-height:1.12;letter-spacing:-.01em;}
+  h2{font-size:clamp(22px,3vw,36px);line-height:1.15;}
+  h3{font-size:clamp(16px,1.8vw,21px);}
+  p{color:var(--ink-2);line-height:1.7;}
+  .eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:13px;letter-spacing:.18em;
+    color:var(--clay-d);font-weight:600;text-transform:uppercase;margin-bottom:14px;}
+  .eyebrow::before{content:"";width:26px;height:2px;background:var(--clay);border-radius:2px;}
+  .lead{font-size:clamp(16px,1.7vw,20px);color:var(--ink-2);max-width:60ch;}
+  .muted{color:var(--ink-3);}
+  .accent{color:var(--clay-d);}
+  .accent-g{color:var(--green-d);}
+
+  .grid{display:grid;gap:18px;}
+  .two{grid-template-columns:1fr 1fr;}
+  .three{grid-template-columns:repeat(3,1fr);}
+  .cards .card{
+    background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 18px;
+    box-shadow:var(--shadow);
+  }
+  .card h3{margin-bottom:8px;}
+  .card .tag{font-size:12px;color:var(--clay-d);font-weight:600;letter-spacing:.04em;}
+  .card p{font-size:14.5px;}
+
+  ul.feat{list-style:none;display:flex;flex-direction:column;gap:14px;max-width:64ch;}
+  ul.feat li{position:relative;padding-left:30px;font-size:clamp(15px,1.6vw,18px);color:var(--ink);line-height:1.55;}
+  ul.feat li::before{content:"";position:absolute;left:0;top:.55em;width:12px;height:12px;border-radius:50%;
+    background:var(--clay);box-shadow:0 0 0 4px rgba(194,104,59,.16);}
+  ul.feat li b{color:var(--clay-d);}
+
+  /* ---------- 封面 ---------- */
+  .cover{align-items:stretch;}
+  .cover .stage{display:flex;flex-direction:column;justify-content:center;max-width:1000px;}
+  .cover .brand{display:flex;align-items:center;gap:14px;margin-bottom:34px;}
+  .cover .logo{width:54px;height:54px;border-radius:15px;background:var(--clay);color:#fff;
+    display:grid;place-items:center;font-size:24px;font-weight:700;box-shadow:var(--shadow);}
+  .cover .brand b{font-size:18px;letter-spacing:.04em;}
+  .cover .brand span{display:block;font-size:12px;color:var(--ink-3);letter-spacing:.22em;margin-top:2px;}
+  .cover h1{margin-bottom:20px;}
+  .cover .sub{font-size:clamp(16px,1.9vw,22px);color:var(--ink-2);max-width:54ch;line-height:1.6;}
+  .cover .meta{margin-top:40px;display:flex;gap:26px;flex-wrap:wrap;color:var(--ink-3);font-size:14px;}
+  .cover .meta b{color:var(--ink);font-weight:600;}
+
+  /* ---------- 分节 ---------- */
+  .divider .stage{display:flex;align-items:center;gap:34px;}
+  .divider .num{font-size:clamp(64px,12vw,150px);font-weight:800;color:var(--clay);line-height:.9;opacity:.9;}
+  .divider .dh h2{margin-bottom:10px;}
+  .divider .dh p{font-size:16px;max-width:46ch;}
+
+  /* ---------- 议程 ---------- */
+  .agenda{display:grid;grid-template-columns:1fr 1fr;gap:14px 30px;margin-top:6px;}
+  .agenda .item{display:flex;gap:14px;align-items:flex-start;padding:14px 16px;border-radius:12px;
+    background:var(--surface);border:1px solid var(--line);}
+  .agenda .n{font-weight:800;color:var(--clay);font-size:18px;min-width:30px;}
+  .agenda .t b{display:block;font-size:16.5px;margin-bottom:3px;}
+  .agenda .t span{font-size:13.5px;color:var(--ink-3);}
+
+  /* ---------- 图（SVG） ---------- */
+  .fig{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:var(--shadow);}
+  .fig svg{width:100%;height:auto;display:block;}
+  .figcap{font-size:13px;color:var(--ink-3);margin-top:10px;text-align:center;}
+
+  .flow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+  .chip{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 14px;
+    font-size:14px;box-shadow:var(--shadow);}
+  .chip b{color:var(--clay-d);}
+  .arrow{color:var(--ink-3);font-size:20px;}
+
+  /* ---------- 顶部进度/页脚 ---------- */
+  .progress{position:fixed;top:0;left:0;height:4px;background:var(--clay);width:0;z-index:50;transition:width .35s;}
+  .pageno{position:fixed;bottom:16px;right:22px;font-size:13px;color:var(--ink-3);z-index:50;
+    background:rgba(255,255,255,.7);padding:4px 10px;border-radius:20px;backdrop-filter:blur(4px);}
+  .hint{position:fixed;bottom:16px;left:22px;font-size:12px;color:var(--ink-3);z-index:50;opacity:.8;}
+  .overview{position:fixed;inset:0;background:var(--paper);z-index:60;display:none;padding:5vh 6vw;overflow:auto;}
+  .overview.show{display:block;}
+  .ov-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:24px;}
+  .ov-card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px;font-size:13.5px;
+    cursor:pointer;min-height:92px;display:flex;flex-direction:column;justify-content:space-between;}
+  .ov-card .on{font-weight:800;color:var(--clay);font-size:15px;}
+  .ov-card:hover{border-color:var(--clay);}
+
+  .hl{background:linear-gradient(transparent 62%,rgba(194,104,59,.22) 0);padding:0 2px;}
+  .note{font-size:12.5px;color:var(--ink-3);margin-top:14px;border-left:3px solid var(--line);padding-left:12px;}
+  @media (max-width:760px){
+    .two,.three,.agenda{grid-template-columns:1fr;}
+    .divider .stage{flex-direction:column;align-items:flex-start;gap:8px;}
+  }
+</style>
+</head>
+<body>
+<div class="progress" id="progress"></div>
+<div class="deck" id="deck">
+
+  <!-- 1 封面 -->
+  <section class="slide cover active">
+    <div class="stage">
+      <div class="brand">
+        <div class="logo">研</div>
+        <div><b>研习台</b><span>RESEARCH · DESK</span></div>
+      </div>
+      <h1>用 AI 重塑<span class="accent">开放性知识工作</span><br/>——「研习台」科研工作台的设计与实践</h1>
+      <p class="sub">一个纯前端、跨端同步、由开放 AI 能力驱动的科研与生活工作台：把海量顶刊与零散灵感，转化为「可行动的科研线索」。</p>
+      <div class="meta">
+        <div>汇报人：<b>___</b></div>
+        <div>方向：<b>技术经济与管理</b></div>
+        <div>日期：<b>2026.09</b></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2 目录 -->
+  <section class="slide">
+    <div class="stage">
+      <div class="eyebrow">Agenda</div>
+      <h2>本次汇报的三条主线</h2>
+      <div class="agenda" style="margin-top:26px;">
+        <div class="item"><div class="n">01</div><div class="t"><b>设计思路与亮点</b><span>为什么做、做什么、独特在哪</span></div></div>
+        <div class="item"><div class="n">02</div><div class="t"><b>技术路线</b><span>多端同步实现 + 可复用的工程实践</span></div></div>
+        <div class="item"><div class="n">03</div><div class="t"><b>其他思考与展望</b><span>方法论、元实践、局限与下一步</span></div></div>
+        <div class="item"><div class="n">+</div><div class="t"><b>演示与 Q&amp;A</b><span>结合真实界面走查</span></div></div>
+      </div>
+      <p class="note">建议节奏：设计（含价值）→ 技术（含同步重点）→ 反思（留时间给讨论）。</p>
+    </div>
+  </section>
+
+  <!-- 3 背景问题 -->
+  <section class="slide">
+    <div class="stage">
+      <div class="eyebrow">Why · 问题</div>
+      <h2>开放性知识工作的真实困境</h2>
+      <div class="grid two" style="margin-top:24px;">
+        <div class="cards"><div class="card">
+          <span class="tag">信息散落</span><h3>工具太多，线索太碎</h3>
+          <p>选题、文献、笔记、日程、生活记录分散在 5+ 个 App，研究者在不同入口间反复切换，缺少统一工作台。</p>
+        </div></div>
+        <div class="cards"><div class="card">
+          <span class="tag">收藏 ≠ 理解</span><h3>「存了」不等于「读了」</h3>
+          <p>顶刊论文收藏即结束；摘要是英文、方法陌生，阅读门槛高，大量资料沉睡在收藏夹里。</p>
+        </div></div>
+        <div class="cards"><div class="card">
+          <span class="tag">跨端割裂</span><h3>电脑写、手机记，对不上</h3>
+          <p>实验室用电脑、通勤用手机，数据不互通；想「随手记一条灵感」却要回到电脑端才能落地。</p>
+        </div></div>
+        <div class="cards"><div class="card">
+          <span class="tag">被动接收</span><h3>信息过载，缺乏过滤</h3>
+          <p>推送 overwhelms；缺少「与我方向相关」的筛选，研究者的注意力被稀释。</p>
+        </div></div>
+      </div>
+      <p class="lead" style="margin-top:22px;">→ 研习台的目标：把<span class="hl">「信息流」变成「可行动的科研线索」</span>，让 AI 替你做过滤、翻译与结构化。</p>
+    </div>
+  </section>
+
+  <!-- 4 产品定位 -->
+  <section class="slide">
+    <div class="stage">
+      <div class="eyebrow">What · 定位</div>
+      <h2>研习台 = 科研与生活的统一工作台</h2>
+      <p class="lead" style="margin-top:14px;">一个打开网页即用的工具：<b>数据自主、AI 辅助、跨端无缝</b>。无后端、无账号、零成本部署。</p>
+      <div class="grid three" style="margin-top:26px;">
+        <div class="cards"><div class="card">
+          <h3>🗂 科研主线</h3><p>顶刊每日推荐、论文追踪（选题→投稿→录用）、项目、方向、研读笔记、成果档案。</p>
+        </div></div>
+        <div class="cards"><div class="card">
+          <h3>🌱 生活侧写</h3><p>运动、阅读观影、旅行、习惯打卡，以及周/月/年阶段回顾，呼应「学者也是完整的人」。</p>
+        </div></div>
+        <div class="cards"><div class="card">
+          <h3>⚡ 低摩擦捕获</h3><p>悬浮按钮 + 底部速记面板，灵感/选题/文献/待办一键入箱，记完即走。</p>
+        </div></div>
+      </div>
+      <div class="fig" style="margin-top:20px;">
+        <div class="flow" style="justify-content:center;">
+          <span class="chip"><b>移动端</b> 随手记</span><span class="arrow">↔</span>
+          <span class="chip"><b>云端</b> 单一真相源</span><span class="arrow">↔</span>
+          <span class="chip"><b>电脑端</b> 深阅读/管理</span>
+        </div>
+        <div class="figcap">同一套网页，同一份数据，手机与电脑共享。</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 设计理念 -->
+  <section class="slide">
+    <div class="stage">
+      <div class="eyebrow">Design · 理念</div>
+      <h2>四条贯穿始终的设计原则</h2>
+      <ul class="feat" style="margin-top:24px;">
+        <li><b>本地优先 · 数据自主</b>——研究者的私密数据默认存本地，可选自建云端；不依赖任何商业平台，随时可导出。</li>
+        <li><b>AI 做「过滤器 / 翻译器 / 结构器」</b>——不是堆砌大模型，而是用轻量 API 把信息筛成与你相关的、能读懂的、成体系的科研线索。</li>
+        <li><b>低摩擦捕获</b>——灵感稍纵即逝，记录动作要 ≤ 2 次点击；先记下来，再整理。</li>
+        <li><b>科研与生活一体化</b>——把生活记录与阶段回顾纳入工作台，让「复盘」成为习惯而非负担。</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 6 亮点一：AI 推荐 -->
+  <section class="slide">
+    <div class="stage">
+      <div class="eyebrow">Highlight 01 · AI 核心</div>
+      <h2>顶刊每日推荐 + 自动相关性打分</h2>
+      <p class="lead" style="margin-top:12px;">不是「推论文」，而是按你的研究方向，把海量顶刊变成一份<span class="accent">「与你相关的待读清单」</span>。</p>
+      <div class="grid two" style="margin-top:20px;">
+        <div class="fig">
+          <svg viewBox="0 0 520 300" role="img" aria-label="推荐流水线">
+            <defs><marker id="ar" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L6,3 L0,6 Z" fill="#8C8475"/></marker></defs>
+            <style>
+              .box{fill:#fff;stroke:#E2D9C8;stroke-width:1.5;rx:10}
+              .t{font:600 13px -apple-system,"PingFang SC",sans-serif;fill:#2B2823}
+              .s{font:12px -apple-system,"PingFang SC",sans-serif;fill:#5C554B}
+              .c{fill:#C2683B}.cg{fill:#3A6B5E}
+            </style>
+            <rect class="box" x="14" y="110" width="120" height="80" rx="10"/>
+            <text class="t" x="74" y="140" text-anchor="middle">OpenAlex</text>
+            <text class="s" x="74" y="160" text-anchor="middle">开放论文库</text>
+            <text class="s" x="74" y="176" text-anchor="middle">免密钥·CORS</text>
+            <line x1="134" y1="150" x2="170" y2="150" stroke="#8C8475" stroke-width="2" marker-end="url(#ar)"/>
+
+            <rect class="box" x="174" y="110" width="120" height="80" rx="10"/>
+            <text class="t" x="234" y="138" text-anchor="middle">UTD24 / FT50</text>
+            <text class="s" x="234" y="158" text-anchor="middle">按 60+ 顶刊</text>
+            <text class="s" x="234" y="174" text-anchor="middle">ISSN 过滤近45天</text>
+            <line x1="294" y1="150" x2="330" y2="150" stroke="#8C8475" stroke-width="2" marker-end="url(#ar)"/>
+
+            <rect class="box" x="334" y="110" width="120" height="80" rx="10"/>
+            <text class="t" x="394" y="138" text-anchor="middle">主题/方法词典</text>
+            <text class="s" x="394" y="158" text-anchor="middle">正则匹配打分</text>
+            <text class="s" x="394" y="174" text-anchor="middle">相关度排序</text>
+            <line x1="454" y1="150" x2="490" y2="150" stroke="#8C8475" stroke-width="2" marker-end="url(#ar)"/>
+
+            <rect x="494" y="120" width="14" height="60" rx="6" fill="#3A6B5E"/>
+            <text class="s" x="501" y="200" text-anchor="middle" transform="rotate(90 501 150)">输出</text>
+
+            <rect x="174" y="218" width="280" height="56" rx="10" fill="#3A6B5E" opacity=".12" stroke="#3A6B5E"/>
+            <text class="cg" x="314" y="240" text-anchor="middle" font-weight="700" font-size="13">「与你方向相关」的待读清单</text>
+            <text class="s" x="314" y="260" text-anchor="middle">自动标注主题 / 方法 / 方向关联建议</text>
+            <line x1="394" y1="190" x2="394" y2="216" stroke="#3A6B5E" stroke-width="2" marker-end="url(#ar)"/>
+          </svg>
+          <div class="figcap">流水线：OpenAlex → 顶刊过滤 → 相关性打分 → 待读清单</div>
+        </div>
+        <div>
+          <ul class="feat">
+            <li>数据源<b> OpenAlex</b>：免费、免密钥、浏览器可直连，覆盖 UTD24/FT50 等 60+ 顶刊近 45 天新文。</li>
+            <li>内置<b>方向词典</b>（数字化转型 / AI / 创新 / 专利 / 平台经济…）与<b>方法词典</b>（DID / IV / 文本分析 / 实验…）自动打分。</li>
+            <li>输出不只给标题，还给出<span class="hl">「为什么值得你读」</span>的方向关联说明，引导做中国情境或选题迁移。</li>
+            <li>结果<b>当日缓存</b>到本地，每天只请求一次，省流量也更快。</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7 亮点二：翻译 -->
+  <section class="slide">
+    <div class="stage">
+      <div class="eyebrow">Highlight 02 · 降门槛</div>
+      <h2>一键摘要翻译：把顶刊读「懂」</h2>
+      <div class="grid two" style="margin-top:22px;">
+        <div class="cards"><div class="card">
+          <span class="tag">主通道</span><h3>微软 Edge 翻译接口</h3>
+          <p>免密钥、CORS 开放、国内可直连。Token 8 分钟缓存，按论文 id 缓存译文，<b>同一篇只翻一次</b>。</p>
+        </div></div>
+        <div class="cards"><div class="card">
+          <span class="tag">备用通道</span><h3>Google gtx 兜底</h3>
+          <p>主通道异常时自动切换，保证「读得了」。带超时控制，单篇不卡死整体。</p>
+        </div></div>
+      </div>
+      <p class="lead" style="margin-top:22px;">价值：把英文摘要、方法说明翻译成中文对照，<span class="accent">显著降低顶刊阅读门槛</span>——尤其对快速判断「这篇与我何干」极为高效。</p>
+      <p class="note">设计取舍：用免费公开接口而非自建模型服务，符合「零成本、可直连、易维护」的个人工具定位。</p>
+    </div>
+  </section>
+
+  <!-- 8 亮点三：科研全生命周期 -->
+  <section class="slide">
+    <div class="stage">
+      <div class="eyebrow">Highlight 03 · 管理</div>
+      <h2>科研全生命周期，一处管完</h2>
+      <div class="grid three" style="margin-top:22px;">
+        <div class="cards"><div class="card">
+          <h3>📄 论文追踪</h3><p>选题构思→文献综述→方法设计→初稿→投稿→返修→录用→发表，阶段流一目了然。</p>
+        </div></div>
+        <div class="cards"><div class="card">
+          <h3>📁 项目 / 方向</h3><p>学术研究、学科竞赛、实习实践分类型管理；研究方向独立成册，论文可挂接方向。</p>
+        </div></div>
+        <div class="cards"><div class="card">
+          <h3>📝 笔记 / 成果</h3><p>研读笔记随手写；成果档案（论文/项目/获奖/会议）自动统计，一键导出清单。</p>
+        </div></div>
+      </div>
+      <p class="lead" style="margin-top:22px;">把「想到—读—做—成」的闭环沉淀在同一处，<span class="hl">减少在不同工具间搬运的损耗</span>。</p>
+    </div>
+  </section>
+
+  <!-- 9 亮点四：生活与回顾 -->
+  <section class="slide">
+    <div class="stage">
+      <div class="eyebrow">Highlight 04 · 复盘</div>
+      <h2>生活侧写 + 阶段回顾</h2>
+      <div class="grid two" style="margin-top:22px;">
+        <div class="cards"><div class="card">
+          <h3>🌿 生活记录</h3>
+          <p>运动（次数/时长/连续天数）、阅读与观影、旅行计划、习惯打卡——科研之外，生活也被温柔记录。</p>
+        </div></div>
+        <div class="cards"><div class="card">
+          <h3>📊 周 / 月 / 年回顾</h3>
+          <p>自动生成阶段小结与完成率条形图，把科研进展、生活记录、阅读思考、习惯坚持汇成一份「给自己的复盘」。</p>
+        </div></div>
+      </div>
+      <p class="lead" style="margin-top:22px;">设计主张：<span class="accent-g">研究者首先是完整的人</span>。回顾功能让长期主义可见、可坚持。</p>
+    </div>
+  </section>
+
+  <!-- 10 亮点五：灵感捕获 -->
+  <section class="slide">
+    <div class="stage">
+      <div class="eyebrow">Highlight 05 · 捕获</div>
+      <h2>灵感收集箱 + 快速记录</h2>
+      <ul class="feat" style="margin-top:22px;">
+        <li>右下角<b>悬浮按钮（FAB）</b>随时唤起速记面板，灵感/选题/文献/生活/待办一键分类入箱。</li>
+        <li>支持「<b>存为今日任务</b>」，捕获即行动，灵感不流失到别处。</li>
+        <li>首页置顶「随手记一条灵感 / 选题…」，<span class="hl">低摩擦、零心智负担</span>，契合知识工作的即兴性。</li>
+      </ul>
+      <p class="note">这是「低摩擦捕获」原则最直接的产品落点：先收集、后整理，避免好点子沉没。</p>
+    </div>
+  </section>
+
+  <!-- 11 价值小结 -->
+  <section class="slide">
+    <div class="stage">
+      <div class="eyebrow">Value · 小结</div>
+      <h2>研习台带来的改变</h2>
+      <div class="grid three" style="margin-top:24px;">
+        <div class="cards"><div class="card">
+          <h3>从「信息过载」</h3><p class="accent">→ 到「相关性筛选」</p><p>AI 替你过滤，注意力回到真正相关的文献。</p>
+        </div></div>
+        <div class="cards"><div class="card">
+          <h3>从「收藏沉睡」</h3><p class="accent">→ 到「读得懂、用得上」</p><p>翻译 + 方向关联，让顶刊真正进入思考。</p>
+        </div></div>
+        <div class="cards"><div class="card">
+          <h3>从「跨端割裂」</h3><p class="accent">→ 到「一处更新、处处同步」</p><p>手机记、电脑管，数据自主不锁死。</p>
+        </div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 12 技术路线总览 -->
+  <section class="slide">
+    <div class="stage">
+      <div class="eyebrow">Technical · 总览</div>
+      <h2>技术路线：一个纯前端的轻量架构</h2>
+      <div class="fig" style="margin-top:20px;">
+        <svg viewBox="0 0 760 300" role="img" aria-label="系统架构">
+          <defs><marker id="ar2" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto">
+            <path d="M0,0 L6,3 L0,6 Z" fill="#8C8475"/></marker></defs>
+          <style>
+            .b{fill:#fff;stroke:#E2D9C8;stroke-width:1.5}
+            .bt{font:700 14px -apple-system,"PingFang SC",sans-serif;fill:#2B2823}
+            .bs{font:12px -apple-system,"PingFang SC",sans-serif;fill:#5C554B}
+            .cc{fill:#C2683B}.cg{fill:#3A6B5E}.cb{fill:#3E6CA8}
+          </style>
+          <!-- 客户端 -->
+          <rect class="b" x="20" y="40" width="200" height="100" rx="12"/>
+          <text class="bt" x="120" y="72" text-anchor="middle">浏览器（手机 / 电脑）</text>
+          <text class="bs" x="120" y="94" text-anchor="middle">同一套响应式 SPA</text>
+          <text class="bs" x="120" y="112" text-anchor="middle">Vanilla JS · 零框架</text>
+
+          <!-- GitHub Pages -->
+          <rect class="b" x="280" y="40" width="200" height="100" rx="12"/>
+          <text class="bt" x="380" y="72" text-anchor="middle">静态托管</text>
+          <text class="bs" x="380" y="94" text-anchor="middle">GitHub Pages</text>
+          <text class="bs" x="380" y="112" text-anchor="middle">一键 deploy.bat 发布</text>
+
+          <!-- 开放 API -->
+          <rect x="540" y="20" width="200" height="80" rx="12" fill="#3E6CA8" opacity=".1" stroke="#3E6CA8"/>
+          <text class="cb" x="640" y="50" text-anchor="middle" font-weight="700">开放 API（免密钥）</text>
+          <text class="bs" x="640" y="72" text-anchor="middle">OpenAlex · 论文</text>
+          <text class="bs" x="640" y="90" text-anchor="middle">Edge/Google · 翻译</text>
+
+          <!-- 存储 -->
+          <rect x="540" y="130" width="200" height="80" rx="12" fill="#3A6B5E" opacity=".1" stroke="#3A6B5E"/>
+          <text class="cg" x="640" y="160" text-anchor="middle" font-weight="700">存储</text>
+          <text class="bs" x="640" y="182" text-anchor="middle">localStorage（本地优先）</text>
+          <text class="bs" x="640" y="200" text-anchor="middle">JSONBin（可选云端）</text>
+
+          <line x1="220" y1="90" x2="276" y2="90" stroke="#8C8475" stroke-width="2" marker-end="url(#ar2)"/>
+          <line x1="480" y1="70" x2="536" y2="55" stroke="#3E6CA8" stroke-width="2" marker-end="url(#ar2)"/>
+          <line x1="480" y1="110" x2="536" y2="160" stroke="#3A6B5E" stroke-width="2" marker-end="url(#ar2)"/>
+          <line x1="640" y1="130" x2="640" y2="140" stroke="#3A6B5E" stroke-width="2"/>
+        </svg>
+        <div class="figcap">无后端、无数据库：前端直接消费开放 API，数据本地优先 + 可选云端。</div>
+      </div>
+      <p class="lead" style="margin-top:16px;">一句话：<b>前端即应用，开放 API 即服务，浏览器即数据库</b>。零服务器成本，个人即可长期维护。</p>
+    </div>
+  </section>
+
+  <!-- 13 核心技术一：多端同步（重点） -->
+  <section class="slide">
+    <div class="stage">
+      <div class="eyebrow">Core · 重点</div>
+      <h2>移动端与电脑端，如何同步？</h2>
+      <p class="lead" style="margin-top:12px;">三层方案，层层兜底，保证「<b>一处更新、处处同步</b>」且手机/电脑体验一致。</p>
+      <div class="grid three" style="margin-top:22px;">
+        <div class="cards"><div class="card">
+          <span class="tag">第一层 · 同源</span><h3>同一套代码</h3>
+          <p>同一份静态托管（GitHub Pages），手机电脑打开同一 URL 即同一应用。断点 <b>780px</b> 切换导航形态：桌面侧栏 ↔ 移动底部 Tab，数据与逻辑完全共用。</p>
+        </div></div>
+        <div class="cards"><div class="card">
+          <span class="tag">第二层 · 同步</span><h3>本地优先 + 云端真相源</h3>
+          <p>整份应用状态 = <b>一个 JSON</b>。localStorage 本地优先；开启同步后存 JSONBin 云端，启动拉取、本地更旧则采用云端（last-write-wins + 时间戳），保存防抖后推送。</p>
+        </div></div>
+        <div class="cards"><div class="card">
+          <span class="tag">第三层 · 更新</span><h3>版本自更新</h3>
+          <p>每次发布更新 <code>version.txt</code>；手机端打开时 <code>checkUpdate</code> 发现新版本自动重载，<b>无需应用商店</b>即可拿到新功能。</p>
+        </div></div>
+      </div>
+      <p class="note">降级策略：未配置云端 / 断网时，自动回退为纯本地（localStorage），功能不中断——这是「优雅降级」原则的体现。</p>
+    </div>
+  </section>
+
+  <!-- 14 同步机制图示 -->
+  <section class="slide">
+    <div class="stage">
+      <div class="eyebrow">Core · 机制</div>
+      <h2>同步时序：手机 ↔ 云端 ↔ 电脑</h2>
+      <div class="fig" style="margin-top:18px;">
+        <svg viewBox="0 0 760 280" role="img" aria-label="同步时序">
+          <defs><marker id="ar3" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto">
+            <path d="M0,0 L7,3 L0,6 Z" fill="#C2683B"/></marker></defs>
+          <style>
+            .dev{fill:#fff;stroke:#E2D9C8;stroke-width:1.5}
+            .dt{font:700 14px -apple-system,"PingFang SC",sans-serif;fill:#2B2823}
+            .ds{font:12px -apple-system,"PingFang SC",sans-serif;fill:#5C554B}
+            .cl{fill:#3A6B5E}
+          </style>
+          <rect class="dev" x="40" y="30" width="180" height="70" rx="12"/>
+          <text class="dt" x="130" y="58" text-anchor="middle">📱 手机端</text>
+          <text class="ds" x="130" y="78" text-anchor="middle">localStorage + 推送</text>
+
+          <rect x="290" y="105" width="180" height="70" rx="12" fill="#3A6B5E" opacity=".12" stroke="#3A6B5E"/>
+          <text class="cl" x="380" y="133" text-anchor="middle" font-weight="700">☁ JSONBin 云端</text>
+          <text class="ds" x="380" y="153" text-anchor="middle">单一真相源（一个 Bin）</text>
+
+          <rect class="dev" x="540" y="30" width="180" height="70" rx="12"/>
+          <text class="dt" x="630" y="58" text-anchor="middle">💻 电脑端</text>
+          <text class="ds" x="630" y="78" text-anchor="middle">localStorage + 拉取</text>
+
+          <!-- pull -->
+          <line x1="380" y1="105" x2="220" y2="58" stroke="#C2683B" stroke-width="2" marker-end="url(#ar3)"/>
+          <text class="ds" x="250" y="92" text-anchor="middle" fill="#C2683B">启动 pull</text>
+          <line x1="380" y1="105" x2="540" y2="58" stroke="#C2683B" stroke-width="2" marker-end="url(#ar3)"/>
+          <text class="ds" x="510" y="92" text-anchor="middle" fill="#C2683B">启动 pull</text>
+          <!-- push -->
+          <line x1="220" y1="70" x2="378" y2="108" stroke="#3A6B5E" stroke-width="2" marker-end="url(#ar3)"/>
+          <text class="ds" x="300" y="98" text-anchor="middle" fill="#3A6B5E">保存后 push</text>
+          <line x1="540" y1="70" x2="382" y2="108" stroke="#3A6B5E" stroke-width="2" marker-end="url(#ar3)"/>
+          <text class="ds" x="460" y="98" text-anchor="middle" fill="#3A6B5E">保存后 push</text>
+
+          <rect x="40" y="210" width="680" height="52" rx="10" fill="#fff" stroke="#E2D9C8"/>
+          <text class="ds" x="60" y="232" >冲突处理：<b style="color:#C2683B">last-write-wins</b>（以 savedAt 时间戳为准）；推送前 700ms 防抖 + 单飞（in-flight），避免并发覆盖。</text>
+          <text class="ds" x="60" y="252" >适用场景：单人多端、非并发编辑——个人知识工作的典型形态。</text>
+        </svg>
+        <div class="figcap">同步示意：双端各持本地副本，以云端为仲裁，时间戳决定胜负。</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 15 核心技术二：开放 API -->
+  <section class="slide">
+    <div class="stage">
+      <div class="eyebrow">Core · 零成本</div>
+      <h2>零成本开放 API 架构</h2>
+      <div class="grid two" style="margin-top:22px;">
+        <div class="cards"><div class="card">
+          <h3>📚 OpenAlex（论文）</h3>
+          <p>完全免费、无需密钥、支持浏览器跨域直连。按期刊 ISSN + 时间窗过滤，返回结构化 JSON，前端直接计算相关性。</p>
+        </div></div>
+        <div class="cards"><div class="card">
+          <h3>🌐 Edge / Google（翻译）</h3>
+          <p>微软 Edge 翻译接口国内可直连、免密钥；Google gtx 作兜底。两通道皆带超时，保障可用。</p>
+        </div></div>
+      </div>
+      <h3 style="margin-top:24px;">可复用的缓存策略</h3>
+      <ul class="feat" style="margin-top:12px;">
+        <li><b>论文推荐</b>：按「当天」缓存到 localStorage，每日只请求一次。</li>
+        <li><b>摘要译文</b>：按论文 id 缓存，同一篇只翻译一次；缓存上限 240 条，超量按时间淘汰。</li>
+        <li><b>统一收益</b>：省流量、提速、降低对第三方接口的依赖与受限风险。</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 16 核心技术三：工程实践 -->
+  <section class="slide">
+    <div class="stage">
+      <div class="eyebrow">Core · 工程</div>
+      <h2>值得复用的工程实践</h2>
+      <ul class="feat" style="margin-top:22px;">
+        <li><b>单一数据源 + 规范化（normalize）</b>：整份应用状态是一个 JSON 对象；读入即归一（补默认字段、修类型），渲染层永远拿到「干净」的结构。</li>
+        <li><b>版本迁移（v1 → v2）</b>：旧数据自动拆分项目/论文、ICS 任务转日历事件，<span class="hl">老用户升级无感</span>。</li>
+        <li><b>渐进增强 / 优雅降级</b>：同步失败不阻塞、翻译失败回退、本地存储满则放弃缓存——任何一环出问题，核心功能仍可工作。</li>
+        <li><b>零框架、零构建</b>：纯 HTML/CSS/JS，单文件即可运行；也可打包进 <code>dist/</code>。维护成本低，适合个人长期持有。</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 17 其他：方法论 + 元实践 -->
+  <section class="slide">
+    <div class="stage">
+      <div class="eyebrow">Other · 反思</div>
+      <h2>方法论：AI 在知识工作中的三角色</h2>
+      <div class="grid three" style="margin-top:22px;">
+        <div class="cards"><div class="card">
+          <h3>🔻 过滤器</h3><p>从信息洪流中筛出「与我相关」，对抗注意力稀释。</p>
+        </div></div>
+        <div class="cards"><div class="card">
+          <h3>🔤 翻译器</h3><p>把语言/方法门槛拉平，让顶刊真正可读可用。</p>
+        </div></div>
+        <div class="cards"><div class="card">
+          <h3>🧱 结构器</h3><p>把零散灵感组织成可追踪的科研进程与复盘。</p>
+        </div></div>
+      </div>
+      <p class="lead" style="margin-top:24px;"><span class="accent">元实践视角</span>：这个工具本身的构建，也是「用 AI 辅助完成 AI 工具」的开放知识工作范例——需求、设计、编码、部署一体打通。</p>
+    </div>
+  </section>
+
+  <!-- 18 局限与下一步 -->
+  <section class="slide">
+    <div class="stage">
+      <div class="eyebrow">Other · 展望</div>
+      <h2>局限与下一步</h2>
+      <div class="grid two" style="margin-top:22px;">
+        <div class="cards"><div class="card">
+          <span class="tag">当前局限</span><h3>同步是「近似一致」</h3>
+          <p>last-write-wins 适合单人多端非并发；若两端同时改，后写覆盖先写，无自动合并。</p>
+        </div></div>
+        <div class="cards"><div class="card">
+          <span class="tag">下一步</span><h3>真正的多端实时协同</h3>
+          <p>引入 <b>Yjs / CRDT</b> 做字段级合并，支持离线编辑后无冲突合并；可拓展到多人课题组共用。</p>
+        </div></div>
+        <div class="cards"><div class="card">
+          <span class="tag">当前局限</span><h3>翻译依赖第三方免费接口</h3>
+          <p>受配额与可用性影响，需关注稳定性。</p>
+        </div></div>
+        <div class="cards"><div class="card">
+          <span class="tag">下一步</span><h3>能力延展</h3>
+          <p>RSS 订阅、BibTeX 导出、Notion 同步、AI 摘要总结；并把推荐词典做成可自定义。</p>
+        </div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 19 总结 -->
+  <section class="slide divider">
+    <div class="stage">
+      <div class="num">✶</div>
+      <div class="dh">
+        <div class="eyebrow">Closing</div>
+        <h2>让 AI 成为知识工作的「第一道工序」</h2>
+        <p>研习台不是一个更大的收藏夹，而是一套<span class="accent">把开放信息转化为个人科研动能</span>的工作方法：同源跨端、数据自主、AI 过滤与结构化。它既是成果，也是方法的载体。</p>
+        <p style="margin-top:18px;color:var(--ink-3);">感谢聆听 · 欢迎讨论与拍砖 🙏</p>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<div class="pageno" id="pageno">1 / 19</div>
+<div class="hint">← → 翻页 · 空格下一页 · O 总览</div>
+
+<div class="overview" id="overview">
+  <div class="eyebrow">Overview</div>
+  <h2>幻灯片总览</h2>
+  <div class="ov-grid" id="ovGrid"></div>
+</div>
+
+<script>
+  const deck = document.getElementById('deck');
+  const slides = [...deck.querySelectorAll('.slide')];
+  let cur = 0;
+  const progress = document.getElementById('progress');
+  const pageno = document.getElementById('pageno');
+
+  function show(i){
+    cur = (i + slides.length) % slides.length;
+    slides.forEach((s,idx)=>s.classList.toggle('active', idx===cur));
+    progress.style.width = ((cur+1)/slides.length*100)+'%';
+    pageno.textContent = (cur+1)+' / '+slides.length;
+  }
+  function next(){ show(cur+1); }
+  function prev(){ show(cur-1); }
+
+  window.addEventListener('keydown', e=>{
+    if(e.key==='ArrowRight'||e.key===' '||e.key==='PageDown'){ e.preventDefault(); next(); }
+    else if(e.key==='ArrowLeft'||e.key==='PageUp'){ e.preventDefault(); prev(); }
+    else if(e.key.toLowerCase()==='o'){ toggleOverview(); }
+    else if(e.key==='Escape'){ document.getElementById('overview').classList.remove('show'); }
+  });
+  deck.addEventListener('click', e=>{
+    if(e.target.closest('.overview')) return;
+    const x = e.clientX;
+    if(x < window.innerWidth*0.32) prev();
+    else if(x > window.innerWidth*0.68) next();
+  });
+
+  // 总览
+  const ov = document.getElementById('overview');
+  const ovGrid = document.getElementById('ovGrid');
+  function buildOverview(){
+    const titles = slides.map(s=>{
+      const h = s.querySelector('h1,h2');
+      return h ? h.textContent.trim().replace(/\s+/g,' ').slice(0,42) : '—';
+    });
+    ovGrid.innerHTML = titles.map((t,i)=>
+      `<div class="ov-card" data-i="${i}"><div class="on">${i+1}</div><div>${t}</div></div>`).join('');
+    ovGrid.querySelectorAll('.ov-card').forEach(c=>
+      c.onclick=()=>{ ov.classList.remove('show'); show(+c.dataset.i); });
+  }
+  function toggleOverview(){ ov.classList.toggle('show'); if(ov.classList.contains('show')) buildOverview(); }
+
+  // 触摸滑动
+  let tx=0;
+  window.addEventListener('touchstart',e=>{ tx=e.touches[0].clientX; },{passive:true});
+  window.addEventListener('touchend',e=>{
+    const dx=e.changedTouches[0].clientX - tx;
+    if(Math.abs(dx)>50){ dx<0?next():prev(); }
+  },{passive:true});
+
+  show(0);
+</script>
+</body>
+</html>

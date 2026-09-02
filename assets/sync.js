@@ -62,14 +62,14 @@ window.Sync = (function () {
     return d.metadata.id; // 新 Bin ID
   }
 
-  // 启动：拉取云端，若云端更新则采用
+  // 启动：拉取云端，以云端为唯一真相（多端收敛），凭据已由 app 端保留
   async function startup(localState, adoptFn) {
     if (!enabled()) { emit('off', '未开启云端同步（仅本机）'); return; }
     emit('syncing', '正在连接云端…');
     try {
       const cloud = await pull();
-      if (cloud && cloud.savedAt && (!localState.savedAt || cloud.savedAt > localState.savedAt)) {
-        adoptFn(cloud); // 用云端覆盖本地（已在 app 内 normalize + 渲染）
+      if (cloud && cloud.savedAt) {
+        adoptFn(cloud); // 用云端覆盖本地（凭据已在 app 内保留，不会被冲掉）
         emit('ok', '已从云端恢复');
       } else {
         emit('ok', '本机已是最新');
