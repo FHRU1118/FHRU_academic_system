@@ -1278,12 +1278,13 @@ function openSettings() {
   body.querySelector('#btnTestSync').onclick = async () => {
     const r = $('#syncTestResult');
     if (!Sync.enabled()) { r.textContent = '请先填写 Bin ID 与 API Key'; r.style.color = 'var(--danger)'; return; }
-    r.textContent = '测试中…'; r.style.color = '';
+    r.textContent = '同步中…'; r.style.color = '';
     try {
-      const cloud = await Sync.pull();
-      if (cloud && cloud.savedAt) { adoptCloud(cloud); r.textContent = '连接成功 ✓ 已同步云端数据'; }
-      else r.textContent = '连接成功 ✓ 云端暂无数据';
-      r.style.color = 'var(--ok)';
+      const res = await Sync.syncNow(S, adoptCloud); // 按「最新编辑端为准」收敛
+      if (res.action === 'off') { r.textContent = '请先填写 Bin ID 与 API Key'; r.style.color = 'var(--danger)'; }
+      else if (res.action === 'error') { r.textContent = res.message; r.style.color = 'var(--danger)'; }
+      else if (res.action === 'pull') { r.textContent = '连接成功 ✓ 已从云端拉取最新数据'; r.style.color = 'var(--ok)'; }
+      else { r.textContent = '连接成功 ✓ 本机较新，已推到云端'; r.style.color = 'var(--ok)'; }
     }
     catch (e) { r.textContent = e.message; r.style.color = 'var(--danger)'; }
   };

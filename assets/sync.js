@@ -65,32 +65,43 @@ window.Sync = (function () {
     return d.metadata.id; // 新 Bin ID
   }
 
-  // 启动：拉取云端，以云端为唯一真相（多端收敛），凭据已由 app 端保留
-  async function startup(localState, adoptFn) {
-    if (!enabled()) { emit('off', '未开启云端同步（仅本机）'); return; }
-    emit('syncing', '正在连接云端…');
+  // 以 savedAt 较大者为胜（最新编辑端为准），解决多端收敛且不覆盖较新数据
+  async function resolve(localState, adoptFn) {
+    emit('syncing', '同步中…');
     try {
       const cloud = await pull();
-      if (cloud && cloud.savedAt) {
-        adoptFn(cloud); // 用云端覆盖本地（凭据已在 app 内保留，不会被冲掉）
+      const cloudTime = (cloud && cloud.savedAt) || 0;
+      const localTime = (localState && localState.savedAt) || 0;
+      if (cloudTime > localTime) {
+        // 云端更新 → 采用云端（不会动本机较新的凭据，adoptCloud 已保留）
+        adoptFn(cloud);
+        lastSyncedAt = cloudTime;
         emit('ok', '已从云端恢复');
+        return { action: 'pull' };
       } else {
-        // 云端为空：把本机状态推上去作为初始种子，避免「空状态」覆盖已有数据
-        emit('syncing', '云端暂无数据，正在上传本机…');
-        try {
-          if (localState) {
-            localState.savedAt = localState.savedAt || Date.now();
-            await push(localState);
-          }
-          emit('ok', '本机已上传为云端初始数据');
-        } catch (e2) {
-          emit('error', '上传本机失败：' + e2.message);
-        }
+        // 本机较新，或云端为空 → 本机胜出，推上云端
+        // 这样既不会用旧云端覆盖本机新编辑，也不会因「空云端」丢失本机数据
+        if (localState) { localState.savedAt = localTime || Date.now(); await push(localState); }
+        lastSyncedAt = localTime || Date.now();
+        emit('ok', cloudTime === 0 ? '本机已作为云端初始数据' : '本机较新，已同步到云端');
+        return { action: 'push' };
       }
-      lastSyncedAt = (cloud && cloud.savedAt) || (localState && localState.savedAt) || 0;
     } catch (e) {
       emit('error', e.message + ' · 暂用本机数据');
+      return { action: 'error', message: e.message };
     }
+  }
+
+  // 启动：按「最新编辑端为准」收敛，凭据已由 app 端保留
+  async function startup(localState, adoptFn) {
+    if (!enabled()) { emit('off', '未开启云端同步（仅本机）'); return; }
+    await resolve(localState, adoptFn);
+  }
+
+  // 手动「测试连接」/立即同步：执行同样的 LWW 收敛并返回结果
+  async function syncNow(localState, adoptFn) {
+    if (!enabled()) return { action: 'off' };
+    return await resolve(localState, adoptFn);
   }
 
   // 保存：防抖后推送（单飞，避免并发）
@@ -113,7 +124,7 @@ window.Sync = (function () {
   }
 
   return {
-    setCreds, enabled, onStatus, startup, save, pull, push, createBin,
+    setCreds, enabled, onStatus, startup, syncNow, save, pull, push, createBin,
     get lastSyncedAt() { return lastSyncedAt; }
   };
 })();
