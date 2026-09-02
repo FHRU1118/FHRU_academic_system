@@ -1269,9 +1269,8 @@ function openSettings() {
     S.settings.binId = $('#setBinId').value.trim();
     S.settings.apiKey = $('#setApiKey').value.trim();
     if (window.Sync) Sync.setCreds(S.settings.binId, S.settings.apiKey);
-    /* 立即同步落盘，确保凭据与数据本地不丢 */
+    /* 凭据立即落盘，确保不丢；先拉云端再决定是否上传，避免覆盖已有云端数据 */
     try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {}
-    save();
     if (Sync.enabled()) Sync.startup(S, adoptCloud);
   };
   body.querySelector('#setBinId').onchange = bindSync;

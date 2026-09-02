@@ -27,7 +27,10 @@ window.Sync = (function () {
       headers: { 'X-Master-Key': apiKey, 'X-Bin-Meta': 'false' }
     });
     if (!res.ok) throw new Error('读取失败(' + res.status + ')');
-    return await res.json(); // 即存好的整份 state
+    const data = await res.json();
+    // JSONBin v3 把数据包在 {record, metadata} 里；X-Bin-Meta:false 时仍是 {record}
+    // 必须拆包，否则上层读 cloud.savedAt / cloud.settings 全部落空，导致永远不采用云端数据
+    return (data && data.record !== undefined) ? data.record : data;
   }
 
   async function push(state) {
@@ -72,9 +75,19 @@ window.Sync = (function () {
         adoptFn(cloud); // 用云端覆盖本地（凭据已在 app 内保留，不会被冲掉）
         emit('ok', '已从云端恢复');
       } else {
-        emit('ok', '本机已是最新');
+        // 云端为空：把本机状态推上去作为初始种子，避免「空状态」覆盖已有数据
+        emit('syncing', '云端暂无数据，正在上传本机…');
+        try {
+          if (localState) {
+            localState.savedAt = localState.savedAt || Date.now();
+            await push(localState);
+          }
+          emit('ok', '本机已上传为云端初始数据');
+        } catch (e2) {
+          emit('error', '上传本机失败：' + e2.message);
+        }
       }
-      lastSyncedAt = (cloud && cloud.savedAt) || localState.savedAt || 0;
+      lastSyncedAt = (cloud && cloud.savedAt) || (localState && localState.savedAt) || 0;
     } catch (e) {
       emit('error', e.message + ' · 暂用本机数据');
     }
