@@ -51,6 +51,7 @@ const ACH_TYPES = [
 
 /* ---------------- 数据层 ---------------- */
 const KEY = 'yanxitai.v2';
+const CREDS_KEY = 'yanxitai.creds'; // 凭据独立存储，云端同步无论如何都冲不掉
 const DEFAULT_STATE = {
   version: 2,
   savedAt: 0,
@@ -71,6 +72,19 @@ const DEFAULT_STATE = {
 };
 
 let S = load();
+loadCreds(); // 用独立存储的凭据兜底，确保云端同步后凭据仍在本机
+
+/* 凭据独立存储：云端数据里即使没有 binId/apiKey，也不会丢本机凭据 */
+function saveCreds() {
+  try { localStorage.setItem(CREDS_KEY, JSON.stringify({ binId: S.settings.binId || '', apiKey: S.settings.apiKey || '' })); } catch (e) {}
+}
+function loadCreds() {
+  try {
+    const c = JSON.parse(localStorage.getItem(CREDS_KEY) || '{}');
+    if (c.binId) S.settings.binId = c.binId;
+    if (c.apiKey) S.settings.apiKey = c.apiKey;
+  } catch (e) {}
+}
 
 function load() {
   try {
@@ -163,6 +177,13 @@ function adoptCloud(cloud) {
   }));
   S.settings.binId = keepBin || cloudBin;
   S.settings.apiKey = keepKey || cloudKey;
+  /* 用独立凭据槽兜底：即便上面都为空，也用本机存储的凭据恢复，绝不让云端清空 */
+  try {
+    const c = JSON.parse(localStorage.getItem(CREDS_KEY) || '{}');
+    S.settings.binId = S.settings.binId || c.binId || '';
+    S.settings.apiKey = S.settings.apiKey || c.apiKey || '';
+  } catch (e) {}
+  saveCreds(); // 同步后再次落盘，确保凭据持久
   try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {}
   renderAll();
 }
@@ -1269,7 +1290,8 @@ function openSettings() {
     S.settings.binId = $('#setBinId').value.trim();
     S.settings.apiKey = $('#setApiKey').value.trim();
     if (window.Sync) Sync.setCreds(S.settings.binId, S.settings.apiKey);
-    /* 凭据立即落盘，确保不丢；先拉云端再决定是否上传，避免覆盖已有云端数据 */
+    /* 凭据立即落盘（双重：主存储 + 独立凭据槽），确保不丢；先拉云端再决定是否上传 */
+    saveCreds();
     try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {}
     if (Sync.enabled()) Sync.startup(S, adoptCloud);
   };
@@ -1489,7 +1511,14 @@ function checkUpdate() {
         localStorage.setItem('yanxitai.seenVersion', v);
         if (seen) {
           toast('发现新版本，正在刷新…');
-          setTimeout(() => location.reload(true), 900);
+          /* 关键：用带版本号的地址整页导航，强制绕过 iOS 主屏/浏览器对 HTML 与资源的缓存 */
+          try {
+            const url = new URL(location.href);
+            url.searchParams.set('_v', v);
+            setTimeout(() => { location.href = url.toString(); }, 900);
+          } catch (e) {
+            setTimeout(() => location.reload(true), 900);
+          }
         }
       }
     })

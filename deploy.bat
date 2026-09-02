@@ -14,6 +14,10 @@ REM 更新版本号（格式 YYYY-MM-DD.HHMMSS），触发手机端自动刷新�
 for /f "tokens=*" %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyy-MM-dd.HHmmss"') do set "VER=%%i"
 echo %VER%> version.txt
 
+REM 把 index.html 里静态资源的版本占位符刷新为本次版本号（击穿浏览器/主屏缓存）
+powershell -NoProfile -Command "$c=Get-Content index.html -Raw; $c=$c -replace '\?v=[0-9.\-]+','?v=__VER__'; Set-Content -Encoding UTF8 index.html $c"
+powershell -NoProfile -Command "$c=Get-Content index.html -Raw; $c=$c -replace '__VER__','%VER%'; Set-Content -Encoding UTF8 index.html $c"
+
 where gh >nul 2>nul
 if not errorlevel 1 (
   for /f "tokens=*" %%i in ('gh auth token') do set "GH_TOKEN=%%i"
